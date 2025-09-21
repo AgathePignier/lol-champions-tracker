@@ -83,6 +83,40 @@ html, body, #root {
   box-shadow: 0 4px 12px rgba(220, 53, 69, 0.5);
 }
 
+.logout-text {
+  display: inline;
+}
+
+.logout-icon {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .user-email {
+    display: none;
+  }
+  
+  .logout-text {
+    display: none;
+  }
+  
+  .logout-icon {
+    display: inline;
+    font-size: 1.2em;
+  }
+}
+
+@media (max-width: 480px) {
+  .user-info {
+    gap: 8px;
+  }
+  
+  .logout-btn {
+    padding: 8px 12px;
+    min-width: auto;
+  }
+}
+
 /* === MAIN CONTAINER === */
 .container {
   width: 90%;
@@ -134,13 +168,14 @@ h1 {
   backdrop-filter: blur(15px);
   border: 2px solid rgba(255, 255, 255, 0.3);
   border-radius: 25px;
-  padding: 16px 25px;
+  padding: 12px 20px;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  max-width: 420px;
+  max-width: 520px;
   margin: 0 auto 20px auto;
   position: relative;
   overflow: hidden;
+  gap: 12px;
 }
 
 .season-selector:hover::before {
@@ -310,6 +345,37 @@ h1 {
 @media (max-width: 768px) {
   .layout {
     grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  
+  .search-container {
+    max-width: 100%;
+    padding: 0 15px;
+    margin: 0 0 15px;
+  }
+  
+  .search-input {
+    font-size: 14px;
+    padding: 10px 35px 10px 12px;
+  }
+  
+  .champions-section {
+    padding: 15px;
+  }
+}
+
+@media (max-width: 480px) {
+  .search-container {
+    padding: 0 10px;
+  }
+  
+  .search-input {
+    font-size: 13px;
+    padding: 8px 30px 8px 10px;
+  }
+  
+  .champions-section {
+    padding: 10px;
   }
 }
 
@@ -468,6 +534,92 @@ h1 {
   box-shadow: 0 4px 15px rgba(200, 155, 60, 0.3);
 }
 
+/* === FILTRES === */
+.filters {
+  margin-top: 15px;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 15px;
+}
+
+.filter-btn {
+  padding: 10px 15px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  color: #ffffff;
+  font-size: 0.9em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-align: left;
+  opacity: 0.6;
+}
+
+.filter-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.filter-btn.active {
+  opacity: 1;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+}
+
+.filter-btn.vert.active {
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.8), rgba(76, 175, 80, 0.6));
+  border-color: rgba(76, 175, 80, 0.8);
+  box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+}
+
+.filter-btn.orange.active {
+  background: linear-gradient(135deg, rgba(255, 152, 0, 0.8), rgba(255, 152, 0, 0.6));
+  border-color: rgba(255, 152, 0, 0.8);
+  box-shadow: 0 4px 15px rgba(255, 152, 0, 0.3);
+}
+
+.filter-btn.jaune.active {
+  background: linear-gradient(135deg, rgba(255, 235, 59, 0.8), rgba(255, 235, 59, 0.6));
+  border-color: rgba(255, 235, 59, 0.8);
+  box-shadow: 0 4px 15px rgba(255, 235, 59, 0.3);
+  color: #333;
+}
+
+.filter-btn.blanc.active {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.6));
+  border-color: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 4px 15px rgba(255, 255, 255, 0.3);
+  color: #333;
+}
+
+.filter-shortcuts {
+  display: flex;
+  gap: 8px;
+}
+
+.filter-shortcut {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.8em;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.filter-shortcut:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
 /* === SEARCH === */
 .search-container {
   position: relative;
@@ -475,6 +627,8 @@ h1 {
   max-width: 400px;
   margin: 0 auto 20px;
   flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 0 10px;
 }
 
 .search-input {
@@ -487,6 +641,7 @@ h1 {
   backdrop-filter: blur(10px);
   color: #ffffff;
   transition: all 0.3s ease;
+  box-sizing: border-box;
 }
 
 .search-input::placeholder {
@@ -527,6 +682,8 @@ h1 {
   padding-right: 10px;
   padding-top: 5px;
   min-height: 0;
+  scroll-snap-type: y mandatory;
+  scroll-behavior: smooth;
 }
 
 .champions-list {
@@ -610,11 +767,27 @@ h1 {
 }
 
 .champion-image {
-  width: 48px;
-  height: 48px;
+  width: 60px;
+  height: 60px;
   border-radius: 50%;
   margin-right: 15px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  object-fit: cover;
+  object-position: center;
+  clip-path: circle(24px at center);
+}
+
+.champion-image::before {
+  content: '';
+  position: absolute;
+  top: -10%;
+  left: -10%;
+  width: 120%;
+  height: 120%;
+  background-image: inherit;
+  background-size: cover;
+  background-position: center;
+  z-index: -1;
 }
 
 .champion-info {
@@ -673,42 +846,82 @@ h1 {
 .status-item {
   display: flex;
   justify-content: space-between;
-  padding: 10px;
-  border-radius: 6px;
-  background: #f4f4f4;
+  align-items: center;
+  padding: 15px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  position: relative;
+  overflow: hidden;
+  color: #ffffff;
+}
+
+.status-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  transition: all 0.3s ease;
+}
+
+.status-item:hover {
+  transform: translateX(5px);
+  background: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
 .status-item.blanc {
-  background: linear-gradient(to right, #f8f9fa, #e9ecef);
-  color: #495057;
-  border: 2px solid rgba(173, 181, 189, 0.5);
+  background: linear-gradient(to right, rgba(245, 245, 245, 0.4), rgba(224, 224, 224, 0.1));
+  border-left: 3px solid rgba(208, 208, 208, 0.8);
+}
+
+.status-item.blanc::before {
+  background: linear-gradient(to bottom, #f5f5f5, #d0d0d0);
 }
 
 .status-item.jaune {
-  background: linear-gradient(to right, #fff3cd, #ffeaa7);
-  color: #856404;
-  border: 2px solid rgba(255, 193, 7, 0.6);
+  background: linear-gradient(to right, rgba(255, 215, 0, 0.4), rgba(255, 179, 0, 0.1));
+  border-left: 3px solid rgba(255, 193, 7, 0.8);
+}
+
+.status-item.jaune::before {
+  background: linear-gradient(to bottom, #ffd700, #ffb300);
 }
 
 .status-item.orange {
-  background: linear-gradient(to right, #ffe8cc, #fdcb6e);
-  color: #b45309;
-  border: 2px solid rgba(255, 152, 0, 0.6);
+  background: linear-gradient(to right, rgba(255, 143, 0, 0.4), rgba(230, 81, 0, 0.1));
+  border-left: 3px solid rgba(255, 152, 0, 0.8);
+}
+
+.status-item.orange::before {
+  background: linear-gradient(to bottom, #ff8f00, #e65100);
 }
 
 .status-item.vert {
-  background: linear-gradient(to right, #d1ecf1, #a7ffeb);
-  color: #0c5460;
-  border: 2px solid rgba(76, 175, 80, 0.6);
+  background: linear-gradient(to right, rgba(76, 175, 80, 0.4), rgba(46, 125, 50, 0.1));
+  border-left: 3px solid rgba(67, 160, 71, 0.8);
+}
+
+.status-item.vert::before {
+  background: linear-gradient(to bottom, #4caf50, #2e7d32);
 }
 
 .status-label {
-  font-weight: bold;
-  color: #333;
+  font-weight: 500;
+  color: #ffffff;
+  font-size: 1.1em;
 }
 
 .status-count {
   font-weight: bold;
+  color: #ffffff;
+  font-size: 1.1em;
 }
 
 .total-points {
@@ -799,4 +1012,115 @@ h1 {
 .status-panel::-webkit-scrollbar-thumb:hover,
 .champions-section::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(135deg, rgba(200, 155, 60, 0.7), rgba(200, 155, 60, 0.9));
+}
+
+/* Supprimer toutes les règles .delete-season-btn personnalisées (lignes 870-929) */
+
+/* Et garder seulement les styles cohérents : */
+
+/* === SEASON CONTROL BUTTONS === */
+.season-control-btn {
+  padding: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  font-size: 1.1em;
+  color: #ffffff;
+  position: relative;
+  overflow: hidden;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.season-control-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  transition: left 0.5s ease;
+}
+
+.season-control-btn:hover::before {
+  left: 100%;
+}
+
+.season-control-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.season-control-btn:active {
+  transform: translateY(0);
+}
+
+/* Bouton Nouvelle Saison - Vert */
+.new-season-btn:hover {
+  border-color: rgba(40, 167, 69, 0.5);
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+  background: rgba(40, 167, 69, 0.1);
+}
+
+/* Bouton Renommer - Orange */
+.rename-season-btn:hover {
+  border-color: rgba(255, 165, 0, 0.5);
+  box-shadow: 0 4px 12px rgba(255, 165, 0, 0.3);
+  background: rgba(255, 165, 0, 0.1);
+}
+
+.delete-season-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(220, 53, 69, 0.4);
+}
+
+.delete-season-btn:hover {
+  background: linear-gradient(135deg, #c82333, #bd2130);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(220, 53, 69, 0.4);
+}
+
+.delete-season-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s ease;
+}
+
+.delete-season-btn:hover::before {
+  left: 100%;
+}
+
+.delete-season-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 
+    0 6px 20px rgba(255, 68, 68, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.delete-season-btn:active {
+  transform: translateY(0);
+}
+
+/* Bouton Renommer */
+.rename-season-btn:hover {
+  border-color: rgba(255, 165, 0, 0.5);
+  box-shadow: 0 4px 12px rgba(255, 165, 0, 0.3);
+}
+
+.rename-season-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(255, 165, 0, 0.4);
 }

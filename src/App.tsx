@@ -32,10 +32,16 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(false)
   
+  // États pour les filtres
+  const [statusFilters, setStatusFilters] = useState<Set<Champion['status']>>(new Set(['blanc', 'jaune', 'orange', 'vert']))
+  
   // États pour les saisons
   const [seasons, setSeasons] = useState<Season[]>([])
   const [currentSeason, setCurrentSeason] = useState<Season | null>(null)
   const [showSeasonModal, setShowSeasonModal] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [showRenameModal, setShowRenameModal] = useState(false)
+  const [showLogoutModal, setShowLogoutModal] = useState(false)
 
   // Fonction pour charger les saisons
   const loadSeasons = async () => {
@@ -57,6 +63,8 @@ function App() {
       
       // Trouver la saison active
       const activeSeason = data?.find((s: Season) => s.is_active)
+      console.log('🔍 Saisons trouvées:', data?.length)
+      console.log('✅ Saison active trouvée:', activeSeason?.name || 'Aucune')
       setCurrentSeason(activeSeason || null)
 
     } catch (err) {
@@ -101,6 +109,106 @@ function App() {
       // 3. Recharger les données
       await loadSeasons()
       await loadChampionData()
+
+    } catch (err) {
+      console.error('❌ Erreur réseau:', err)
+    }
+  }
+
+  // Fonction pour supprimer une saison
+  const deleteSeason = async () => {
+    if (!currentSeason || !session?.user?.id) return
+
+    try {
+      console.log('🗑️ Suppression de la saison:', currentSeason.name)
+
+      // 1. Supprimer tous les statuts des champions pour cette saison
+      const { error: statusError } = await supabase
+        .from('champion_status')
+        .delete()
+        .eq('season_id', currentSeason.id)
+        .eq('user_id', session.user.id)
+
+      if (statusError) {
+        console.error('❌ Erreur suppression statuts:', statusError)
+        return
+      }
+
+      // 2. Supprimer la saison
+      const { error: seasonError } = await supabase
+        .from('seasons')
+        .delete()
+        .eq('id', currentSeason.id)
+        .eq('user_id', session.user.id)
+
+      if (seasonError) {
+        console.error('❌ Erreur suppression saison:', seasonError)
+        return
+      }
+
+      console.log('✅ Saison supprimée avec succès')
+
+      // 3. Fermer le modal et recharger les données
+      setShowDeleteModal(false)
+      setCurrentSeason(null)
+      await loadSeasons()
+
+      // 4. Si on vient de supprimer la saison active, activer la plus récente
+      const { data: remainingSeasons } = await supabase
+        .from('seasons')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+
+      if (remainingSeasons && remainingSeasons.length > 0) {
+        // Vérifier s'il y a encore une saison active
+        const hasActiveSeason = remainingSeasons.some(s => s.is_active)
+        
+        if (!hasActiveSeason) {
+          // Activer la saison la plus récente
+          const mostRecentSeason = remainingSeasons[0]
+          await supabase
+            .from('seasons')
+            .update({ is_active: true })
+            .eq('id', mostRecentSeason.id)
+          
+          console.log('✅ Saison la plus récente activée:', mostRecentSeason.name)
+          
+          // Recharger les saisons pour refléter le changement
+          await loadSeasons()
+        }
+      }
+
+      setChampions([]) // Vider la liste des champions
+
+    } catch (err) {
+      console.error('❌ Erreur réseau:', err)
+    }
+  }
+
+  // Fonction pour renommer une saison
+  const renameSeason = async (newName: string) => {
+    if (!currentSeason || !session?.user?.id || !newName.trim()) return
+
+    try {
+      console.log('⚙️ Renommage de la saison:', currentSeason.name, '→', newName)
+
+      const { error } = await supabase
+        .from('seasons')
+        .update({ name: newName.trim() })
+        .eq('id', currentSeason.id)
+        .eq('user_id', session.user.id)
+
+      if (error) {
+        console.error('❌ Erreur renommage saison:', error)
+        return
+      }
+
+      console.log('✅ Saison renommée avec succès')
+      setShowRenameModal(false)
+
+      // Recharger les saisons pour refléter le changement
+      await loadSeasons()
 
     } catch (err) {
       console.error('❌ Erreur réseau:', err)
@@ -216,7 +324,8 @@ function App() {
 
   // Filtrage et tri
   const filteredChampions = champions.filter(champion =>
-    champion.name.toLowerCase().includes(searchQuery.toLowerCase())
+    champion.name.toLowerCase().includes(searchQuery.toLowerCase()) &&
+    statusFilters.has(champion.status)
   )
 
   const sortedChampions = [...filteredChampions].sort((a, b) => {
@@ -225,7 +334,9 @@ function App() {
     if (sortBy === 'name') {
       comparison = a.name.localeCompare(b.name)
     } else {
-      comparison = a.status.localeCompare(b.status)
+      // Tri par statut avec ordre personnalisé : vert, orange, jaune, blanc
+      const statusOrder = { 'vert': 0, 'orange': 1, 'jaune': 2, 'blanc': 3 };
+      comparison = statusOrder[a.status] - statusOrder[b.status];
     }
     
     // Inverser si direction descendante
@@ -266,15 +377,17 @@ function App() {
 
   return (
     <div className="app">
-      {/* Header utilisateur en haut à droite */}
+      {/* Header utilisateur - en haut à droite */}
       <div className="user-header">
         <div className="user-info">
           <span className="user-email">{session?.user?.email}</span>
           <button 
             className="logout-btn"
-            onClick={() => supabase.auth.signOut()}
+            onClick={() => setShowLogoutModal(true)}
+            title="Déconnexion"
           >
-            Déconnexion
+            <span className="logout-text">Déconnexion</span>
+            <span className="logout-icon">✕</span>
           </button>
         </div>
       </div>
@@ -305,10 +418,33 @@ function App() {
             
             <button 
               onClick={() => setShowSeasonModal(true)}
-              className="new-season-btn"
+              className="season-control-btn new-season-btn"
+              title="Nouvelle Saison"
             >
-              Nouvelle Saison
+              ➕
             </button>
+
+            {/* Bouton de modification - visible seulement si une saison est sélectionnée */}
+            {currentSeason && (
+              <button 
+                onClick={() => setShowRenameModal(true)}
+                className="season-control-btn rename-season-btn"
+                title="Renommer la saison"
+              >
+                ⚙️
+              </button>
+            )}
+
+            {/* Bouton de suppression - visible seulement si une saison est sélectionnée */}
+            {currentSeason && (
+              <button 
+                onClick={() => setShowDeleteModal(true)}
+                className="season-control-btn delete-season-btn"
+                title="Supprimer"
+              >
+                🗑️
+              </button>
+            )}
           </div>
         </div>
 
@@ -362,6 +498,85 @@ function App() {
               >
                 Par statut {sortBy === 'status' && (sortDirection === 'asc' ? '↑' : '↓')}
               </button>
+            </div>
+
+            {/* Nouveau bloc de filtres */}
+            <h2 style={{ marginTop: '30px' }}>Filtres</h2>
+            <div className="filters">
+              <div className="filter-group">
+                <button
+                  className={`filter-btn vert ${statusFilters.has('vert') ? 'active' : ''}`}
+                  onClick={() => {
+                    const newFilters = new Set(statusFilters)
+                    if (newFilters.has('vert')) {
+                      newFilters.delete('vert')
+                    } else {
+                      newFilters.add('vert')
+                    }
+                    setStatusFilters(newFilters)
+                  }}
+                >
+                  🟢 Top 1
+                </button>
+                <button
+                  className={`filter-btn orange ${statusFilters.has('orange') ? 'active' : ''}`}
+                  onClick={() => {
+                    const newFilters = new Set(statusFilters)
+                    if (newFilters.has('orange')) {
+                      newFilters.delete('orange')
+                    } else {
+                      newFilters.add('orange')
+                    }
+                    setStatusFilters(newFilters)
+                  }}
+                >
+                  🟠 Top 2-4
+                </button>
+                <button
+                  className={`filter-btn jaune ${statusFilters.has('jaune') ? 'active' : ''}`}
+                  onClick={() => {
+                    const newFilters = new Set(statusFilters)
+                    if (newFilters.has('jaune')) {
+                      newFilters.delete('jaune')
+                    } else {
+                      newFilters.add('jaune')
+                    }
+                    setStatusFilters(newFilters)
+                  }}
+                >
+                  🟡 Top 5-8
+                </button>
+                <button
+                  className={`filter-btn blanc ${statusFilters.has('blanc') ? 'active' : ''}`}
+                  onClick={() => {
+                    const newFilters = new Set(statusFilters)
+                    if (newFilters.has('blanc')) {
+                      newFilters.delete('blanc')
+                    } else {
+                      newFilters.add('blanc')
+                    }
+                    setStatusFilters(newFilters)
+                  }}
+                >
+                  ⚪ Non joué
+                </button>
+              </div>
+              
+              {/* Boutons de raccourci */}
+              <div className="filter-shortcuts">
+                <button
+                  className="filter-shortcut"
+                  onClick={() => setStatusFilters(new Set(['blanc', 'jaune', 'orange', 'vert']))}
+                >
+                  Tout
+                </button>
+                <button
+                  className="filter-shortcut"
+                  onClick={() => setStatusFilters(new Set())}
+                >
+                  Rien
+                </button>
+              </div>
             </div>
           </div>
 
@@ -474,30 +689,47 @@ function App() {
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'center',
             zIndex: 1000
           }}>
             <div style={{
-              backgroundColor: 'white',
+              backgroundColor: '#1a1a1a',
+              border: '2px solid rgba(255, 215, 0, 0.5)',
               padding: '30px',
-              borderRadius: '8px',
-              minWidth: '300px',
-              textAlign: 'center'
+              borderRadius: '12px',
+              minWidth: '400px',
+              textAlign: 'center',
+              boxShadow: '0 10px 30px rgba(255, 215, 0, 0.2)',
+              backdropFilter: 'blur(10px)'
             }}>
-              <h3>Créer une nouvelle saison</h3>
+              <div style={{ fontSize: '48px', marginBottom: '20px' }}>✨</div>
+              <h3 style={{ 
+                color: '#ffd700', 
+                marginBottom: '20px',
+                fontSize: '24px',
+                fontWeight: '600'
+              }}>
+                Créer une nouvelle saison
+              </h3>
               <input
                 id="season-name-input"
                 type="text"
-                placeholder="Nom de la saison"
+                placeholder="Nom de la saison (ex: S2024)"
                 style={{
                   width: '100%',
-                  padding: '10px',
-                  margin: '10px 0',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px'
+                  padding: '12px 16px',
+                  margin: '10px 0 20px 0',
+                  border: '2px solid rgba(255, 255, 255, 0.3)',
+                  borderRadius: '8px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                  color: '#ffffff',
+                  fontSize: '16px',
+                  outline: 'none',
+                  backdropFilter: 'blur(10px)',
+                  boxSizing: 'border-box'
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
@@ -509,7 +741,7 @@ function App() {
                   }
                 }}
               />
-              <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginTop: '20px' }}>
+              <div style={{ display: 'flex', gap: '15px', justifyContent: 'center', marginTop: '25px' }}>
                 <button
                   onClick={() => {
                     const input = document.getElementById('season-name-input') as HTMLInputElement
@@ -519,25 +751,386 @@ function App() {
                     }
                   }}
                   style={{
-                    padding: '10px 20px',
-                    backgroundColor: '#4a90e2',
+                    padding: '12px 24px',
+                    backgroundColor: 'rgba(74, 144, 226, 0.8)',
                     color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer'
+                    border: '2px solid rgba(74, 144, 226, 0.5)',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    fontWeight: '600',
+                    transition: 'all 0.3s ease',
+                    backdropFilter: 'blur(10px)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'rgba(74, 144, 226, 1)'
+                    e.currentTarget.style.transform = 'translateY(-2px)'
+                    e.currentTarget.style.boxShadow = '0 6px 20px rgba(74, 144, 226, 0.4)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'rgba(74, 144, 226, 0.8)'
+                    e.currentTarget.style.transform = 'translateY(0)'
+                    e.currentTarget.style.boxShadow = 'none'
                   }}
                 >
-                  Créer
+                  ✅ Créer
                 </button>
                 <button
                   onClick={() => setShowSeasonModal(false)}
                   style={{
-                    padding: '10px 20px',
+                    padding: '12px 24px',
+                    backgroundColor: 'rgba(108, 117, 125, 0.8)',
+                    color: 'white',
+                    border: '2px solid rgba(108, 117, 125, 0.5)',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    fontWeight: '600',
+                    transition: 'all 0.3s ease',
+                    backdropFilter: 'blur(10px)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'rgba(108, 117, 125, 1)'
+                    e.currentTarget.style.transform = 'translateY(-2px)'
+                    e.currentTarget.style.boxShadow = '0 6px 20px rgba(108, 117, 125, 0.4)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'rgba(108, 117, 125, 0.8)'
+                    e.currentTarget.style.transform = 'translateY(0)'
+                    e.currentTarget.style.boxShadow = 'none'
+                  }}
+                >
+                  ❌ Annuler
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de suppression de saison */}
+        {showDeleteModal && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 1000
+          }}>
+            <div style={{
+              backgroundColor: '#1a1a1a',
+              border: '2px solid #ff4444',
+              padding: '30px',
+              borderRadius: '12px',
+              minWidth: '400px',
+              textAlign: 'center',
+              boxShadow: '0 10px 30px rgba(255, 68, 68, 0.3)'
+            }}>
+              <div style={{ fontSize: '48px', marginBottom: '20px' }}>⚠️</div>
+              <h3 style={{ color: '#ff4444', marginBottom: '15px' }}>
+                Supprimer la saison
+              </h3>
+              <p style={{ color: '#ffffff', marginBottom: '10px' }}>
+                Êtes-vous sûr de vouloir supprimer la saison :
+              </p>
+              <p style={{ 
+                color: '#ffd700', 
+                fontWeight: 'bold', 
+                fontSize: '18px',
+                marginBottom: '20px' 
+              }}>
+                "{currentSeason?.name}"
+              </p>
+              <p style={{ 
+                color: '#ff8888', 
+                fontSize: '14px', 
+                marginBottom: '25px',
+                fontStyle: 'italic' 
+              }}>
+                ⚠️ Cette action est irréversible ! Tous les statuts des champions seront perdus.
+              </p>
+              
+              <div style={{ 
+                display: 'flex', 
+                gap: '15px', 
+                justifyContent: 'center' 
+              }}>
+                <button
+                  onClick={deleteSeason}
+                  style={{
+                    padding: '12px 25px',
+                    backgroundColor: '#ff4444',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    fontSize: '16px',
+                    transition: 'all 0.3s ease'
+                  }}
+                  onMouseOver={(e) => {
+                    (e.target as HTMLButtonElement).style.backgroundColor = '#ff6666';
+                    (e.target as HTMLButtonElement).style.transform = 'scale(1.05)';
+                  }}
+                  onMouseOut={(e) => {
+                    (e.target as HTMLButtonElement).style.backgroundColor = '#ff4444';
+                    (e.target as HTMLButtonElement).style.transform = 'scale(1)';
+                  }}
+                >
+                  🗑️ Supprimer définitivement
+                </button>
+                <button
+                  onClick={() => setShowDeleteModal(false)}
+                  style={{
+                    padding: '12px 25px',
                     backgroundColor: '#6c757d',
                     color: 'white',
                     border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer'
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    fontSize: '16px',
+                    transition: 'all 0.3s ease'
+                  }}
+                  onMouseOver={(e) => {
+                    (e.target as HTMLButtonElement).style.backgroundColor = '#8a9ba8';
+                    (e.target as HTMLButtonElement).style.transform = 'scale(1.05)';
+                  }}
+                  onMouseOut={(e) => {
+                    (e.target as HTMLButtonElement).style.backgroundColor = '#6c757d';
+                    (e.target as HTMLButtonElement).style.transform = 'scale(1)';
+                  }}
+                >
+                  Annuler
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de renommage de saison */}
+        {showRenameModal && (
+          <div 
+            className="modal-backdrop"
+            onClick={() => setShowRenameModal(false)}
+          >
+            <div 
+              className="modal-content"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: 'fixed',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                background: 'linear-gradient(135deg, rgba(30, 30, 30, 0.95), rgba(20, 20, 20, 0.98))',
+                border: '2px solid rgba(200, 155, 60, 0.3)',
+                borderRadius: '12px',
+                padding: '30px',
+                backdropFilter: 'blur(20px)',
+                boxShadow: '0 20px 40px rgba(0, 0, 0, 0.5)',
+                zIndex: 1000,
+                minWidth: '400px',
+                color: '#ffffff'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: '20px' }}>
+                <span style={{ fontSize: '1.5em', marginRight: '10px' }}>⚙️</span>
+                <h3 style={{ margin: 0, color: '#ffffff' }}>Renommer la saison</h3>
+              </div>
+              
+              <input
+                type="text"
+                defaultValue={currentSeason?.name || ''}
+                placeholder="Nom de la saison"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    renameSeason((e.target as HTMLInputElement).value)
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  marginBottom: '20px',
+                  border: '2px solid rgba(200, 155, 60, 0.3)',
+                  borderRadius: '8px',
+                  background: 'rgba(255, 255, 255, 0.1)',
+                  color: '#ffffff',
+                  fontSize: '16px',
+                  backdropFilter: 'blur(10px)',
+                  boxSizing: 'border-box'
+                }}
+              />
+              
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button
+                  onClick={(e) => {
+                    const input = e.currentTarget.parentElement?.parentElement?.querySelector('input') as HTMLInputElement
+                    if (input) renameSeason(input.value)
+                  }}
+                  style={{
+                    padding: '12px',
+                    border: '2px solid rgba(255, 165, 0, 0.5)',
+                    borderRadius: '8px',
+                    background: 'rgba(255, 165, 0, 0.2)',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    transition: 'all 0.3s ease',
+                    backdropFilter: 'blur(10px)',
+                    width: '44px',
+                    height: '44px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '1.2em'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 165, 0, 0.3)'
+                    e.currentTarget.style.borderColor = 'rgba(255, 165, 0, 0.7)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 165, 0, 0.2)'
+                    e.currentTarget.style.borderColor = 'rgba(255, 165, 0, 0.5)'
+                  }}
+                >
+                  ⚙️
+                </button>
+                <button
+                  onClick={() => setShowRenameModal(false)}
+                  style={{
+                    padding: '10px 20px',
+                    border: '2px solid rgba(255, 255, 255, 0.3)',
+                    borderRadius: '8px',
+                    background: 'rgba(255, 255, 255, 0.1)',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    transition: 'all 0.3s ease',
+                    backdropFilter: 'blur(10px)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'
+                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.5)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'
+                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.3)'
+                  }}
+                >
+                  Annuler
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* Modal de déconnexion */}
+        {showLogoutModal && (
+          <div 
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0, 0, 0, 0.7)',
+              backdropFilter: 'blur(5px)',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              zIndex: 2000
+            }}
+          >
+            <div 
+              style={{
+                background: 'rgba(255, 255, 255, 0.15)',
+                backdropFilter: 'blur(20px)',
+                border: '2px solid rgba(255, 255, 255, 0.3)',
+                borderRadius: '16px',
+                padding: '30px',
+                maxWidth: '400px',
+                width: '90%',
+                textAlign: 'center',
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+                color: '#ffffff'
+              }}
+            >
+              <h3 style={{ 
+                margin: '0 0 15px 0', 
+                fontSize: '1.3em', 
+                color: '#ffd700' 
+              }}>
+                Confirmation de déconnexion
+              </h3>
+              <p style={{ 
+                margin: '0 0 25px 0', 
+                fontSize: '1.1em', 
+                lineHeight: '1.4' 
+              }}>
+                Êtes-vous sûr de vouloir vous déconnecter ?
+              </p>
+              <div style={{ 
+                display: 'flex', 
+                gap: '15px', 
+                justifyContent: 'center' 
+              }}>
+                <button
+                  onClick={() => {
+                    supabase.auth.signOut()
+                    setShowLogoutModal(false)
+                  }}
+                  style={{
+                    padding: '12px 20px',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '0.95em',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    transition: 'all 0.3s ease',
+                    minWidth: '120px',
+                    background: 'linear-gradient(135deg, #dc3545, #c82333)',
+                    color: 'white',
+                    boxShadow: '0 2px 8px rgba(220, 53, 69, 0.3)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, #c82333, #a71e2a)'
+                    e.currentTarget.style.transform = 'translateY(-2px)'
+                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(220, 53, 69, 0.5)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, #dc3545, #c82333)'
+                    e.currentTarget.style.transform = 'translateY(0)'
+                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(220, 53, 69, 0.3)'
+                  }}
+                >
+                  Oui, me déconnecter
+                </button>
+                <button
+                  onClick={() => setShowLogoutModal(false)}
+                  style={{
+                    padding: '12px 20px',
+                    border: '2px solid rgba(255, 255, 255, 0.3)',
+                    borderRadius: '8px',
+                    fontSize: '0.95em',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    transition: 'all 0.3s ease',
+                    minWidth: '120px',
+                    background: 'rgba(255, 255, 255, 0.1)',
+                    color: 'white',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'
+                    e.currentTarget.style.transform = 'translateY(-2px)'
+                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.3)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'
+                    e.currentTarget.style.transform = 'translateY(0)'
+                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.2)'
                   }}
                 >
                   Annuler
