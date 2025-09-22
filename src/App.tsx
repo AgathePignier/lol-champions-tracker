@@ -641,6 +641,7 @@ function App() {
                               target="_blank"
                               rel="noopener noreferrer"
                               className="champion-link-btn"
+                              title="--> Build"
                               onClick={(e) => e.stopPropagation()} // Empêche le changement de statut
                             >
                               🔗
