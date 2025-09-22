@@ -9,6 +9,8 @@ interface Champion {
   name: string;
   status: 'blanc' | 'jaune' | 'orange' | 'vert';
   image: string; // Le champ s'appelle "image" dans ta DB
+  link_url?: string; // URL du lien
+  link_text?: string; // Texte du lien
 }
 
 interface Season {
@@ -252,12 +254,14 @@ function App() {
         statusMap.set(item.champion_id, item.status)
       })
 
-      // 4. Combiner champions + statuts
+      // 4. Combiner champions + statuts + liens
       const championsWithStatus: Champion[] = championsData?.map(champion => ({
         id: champion.id,
         name: champion.name,
-        image: champion.image, // Récupérer l'URL de l'image depuis la DB
-        status: (statusMap.get(champion.id) as Champion['status']) || 'blanc'
+        image: champion.image,
+        status: (statusMap.get(champion.id) as Champion['status']) || 'blanc',
+        link_url: champion.link_url,
+        link_text: champion.link_text || 'Guide'
       })) || []
 
       setChampions(championsWithStatus)
@@ -630,11 +634,24 @@ function App() {
                       />
                       <div className="champion-info">
                         <h3>{champion.name}</h3>
-                        <div className="status">
-                          {champion.status === 'vert' && '🟢 Top 1'}
-                          {champion.status === 'orange' && '🟠 Top 2-4'}
-                          {champion.status === 'jaune' && '🟡 Top 5-8'}
-                          {champion.status === 'blanc' && '⚪ Non joué'}
+                        <div className="champion-right">
+                          {champion.link_url && (
+                            <a
+                              href={champion.link_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="champion-link-btn"
+                              onClick={(e) => e.stopPropagation()} // Empêche le changement de statut
+                            >
+                              🔗
+                            </a>
+                          )}
+                          <div className="status">
+                            {champion.status === 'vert' && '🟢 Top 1'}
+                            {champion.status === 'orange' && '🟠 Top 2-4'}
+                            {champion.status === 'jaune' && '🟡 Top 5-8'}
+                            {champion.status === 'blanc' && '⚪ Non joué'}
+                          </div>
                         </div>
                       </div>
                     </div>
