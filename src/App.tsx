@@ -74,9 +74,30 @@ function App() {
     }
   }
 
+  // Fonction pour vérifier si un nom de saison existe déjà
+  const checkSeasonNameExists = (name: string, excludeId?: string): boolean => {
+    const trimmedName = name.trim().toLowerCase()
+    return seasons.some(season => 
+      season.name.toLowerCase() === trimmedName && 
+      season.id !== excludeId
+    )
+  }
+
   // Fonction pour créer une nouvelle saison
   const createNewSeason = async (seasonName: string) => {
     if (!session?.user?.id) return
+
+    const trimmedName = seasonName.trim()
+    if (!trimmedName) {
+      alert('⚠️ Le nom de la saison ne peut pas être vide.')
+      return
+    }
+
+    // Vérifier si le nom existe déjà
+    if (checkSeasonNameExists(trimmedName)) {
+      alert('⚠️ Une saison avec ce nom existe déjà. Veuillez choisir un autre nom.')
+      return
+    }
 
     try {
       // 1. Fermer la saison actuelle
@@ -95,7 +116,7 @@ function App() {
         .from('seasons')
         .insert({
           user_id: session.user.id,
-          name: seasonName,
+          name: trimmedName,
           is_active: true
         })
         .select()
@@ -103,6 +124,7 @@ function App() {
 
       if (error) {
         console.error('❌ Erreur création saison:', error)
+        alert('❌ Erreur lors de la création de la saison.')
         return
       }
 
@@ -114,6 +136,7 @@ function App() {
 
     } catch (err) {
       console.error('❌ Erreur réseau:', err)
+      alert('❌ Erreur de connexion lors de la création de la saison.')
     }
   }
 
@@ -190,19 +213,32 @@ function App() {
 
   // Fonction pour renommer une saison
   const renameSeason = async (newName: string) => {
-    if (!currentSeason || !session?.user?.id || !newName.trim()) return
+    if (!currentSeason || !session?.user?.id) return
+
+    const trimmedName = newName.trim()
+    if (!trimmedName) {
+      alert('⚠️ Le nom de la saison ne peut pas être vide.')
+      return
+    }
+
+    // Vérifier si le nom existe déjà (en excluant la saison actuelle)
+    if (checkSeasonNameExists(trimmedName, currentSeason.id)) {
+      alert('⚠️ Une saison avec ce nom existe déjà. Veuillez choisir un autre nom.')
+      return
+    }
 
     try {
-      console.log('⚙️ Renommage de la saison:', currentSeason.name, '→', newName)
+      console.log('⚙️ Renommage de la saison:', currentSeason.name, '→', trimmedName)
 
       const { error } = await supabase
         .from('seasons')
-        .update({ name: newName.trim() })
+        .update({ name: trimmedName })
         .eq('id', currentSeason.id)
         .eq('user_id', session.user.id)
 
       if (error) {
         console.error('❌ Erreur renommage saison:', error)
+        alert('❌ Erreur lors du renommage de la saison.')
         return
       }
 
@@ -214,6 +250,7 @@ function App() {
 
     } catch (err) {
       console.error('❌ Erreur réseau:', err)
+      alert('❌ Erreur de connexion lors du renommage de la saison.')
     }
   }
 
@@ -341,6 +378,11 @@ function App() {
       // Tri par statut avec ordre personnalisé : vert, orange, jaune, blanc
       const statusOrder = { 'vert': 0, 'orange': 1, 'jaune': 2, 'blanc': 3 };
       comparison = statusOrder[a.status] - statusOrder[b.status];
+      
+      // Si les statuts sont identiques, trier par ordre alphabétique
+      if (comparison === 0) {
+        comparison = a.name.localeCompare(b.name);
+      }
     }
     
     // Inverser si direction descendante
@@ -384,7 +426,10 @@ function App() {
       {/* Header utilisateur - en haut à droite */}
       <div className="user-header">
         <div className="user-info">
-          <span className="user-email">{session?.user?.email}</span>
+          <div className="user-profile">
+            <div className="profile-icon">👤</div>
+            <span className="user-email-expand">{session?.user?.email}</span>
+          </div>
           <button 
             className="logout-btn"
             onClick={() => setShowLogoutModal(true)}
@@ -754,7 +799,7 @@ function App() {
                     const input = e.target as HTMLInputElement
                     if (input.value.trim()) {
                       createNewSeason(input.value.trim())
-                      setShowSeasonModal(false)
+                      // Ne plus fermer automatiquement ici
                     }
                   }
                 }}
@@ -765,7 +810,7 @@ function App() {
                     const input = document.getElementById('season-name-input') as HTMLInputElement
                     if (input.value.trim()) {
                       createNewSeason(input.value.trim())
-                      setShowSeasonModal(false)
+                      // Ne plus fermer automatiquement ici
                     }
                   }}
                   style={{
@@ -988,7 +1033,10 @@ function App() {
                 <button
                   onClick={(e) => {
                     const input = e.currentTarget.parentElement?.parentElement?.querySelector('input') as HTMLInputElement
-                    if (input) renameSeason(input.value)
+                    if (input) {
+                      renameSeason(input.value)
+                      // Ne plus fermer automatiquement ici
+                    }
                   }}
                   style={{
                     padding: '12px',
@@ -1097,7 +1145,7 @@ function App() {
                 <button
                   onClick={() => {
                     supabase.auth.signOut()
-                    setShowLogoutModal(false)
+                    // Ne plus fermer automatiquement ici
                   }}
                   style={{
                     padding: '12px 20px',
