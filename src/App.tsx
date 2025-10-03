@@ -2,6 +2,7 @@ import { useSessionContext, useSupabaseClient } from '@supabase/auth-helpers-rea
 import { useEffect, useState, useRef } from 'react'
 import Auth from '../Auth'
 import './App.css'
+import type { UserProfile } from './types'
 
 // Types
 interface Champion {
@@ -44,6 +45,17 @@ function App() {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showRenameModal, setShowRenameModal] = useState(false)
   const [showLogoutModal, setShowLogoutModal] = useState(false)
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  const [showProfileModal, setShowProfileModal] = useState(false)
+  const [usernameInput, setUsernameInput] = useState('')
+  const [tagInput, setTagInput] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  // Ajouts: états œil et avatar + petites options prédéfinies
+  const [showPwd, setShowPwd] = useState(false)
+  const [showConfirmPwd, setShowConfirmPwd] = useState(false)
+  const [selectedAvatar, setSelectedAvatar] = useState<string | null>(null)
+  const AVAILABLE_AVATARS = ['/avatars/1.png', '/avatars/2.png', '/avatars/3.png', '/avatars/4.png', '/avatars/5.png']
 
   // Fonction pour charger les saisons
   const loadSeasons = async () => {
@@ -212,6 +224,128 @@ function App() {
   }
 
   // Fonction pour renommer une saison
+  const changePassword = async () => {
+    const pwd = newPassword.trim()
+    const confirm = confirmPassword.trim()
+
+    if (!pwd || !confirm) {
+      alert('⚠️ Le mot de passe ne peut pas être vide.')
+      return
+    }
+    if (pwd !== confirm) {
+      alert('⚠️ Les mots de passe ne correspondent pas.')
+      return
+    }
+    // Complexité: min 8, majuscule, minuscule, chiffre
+    const strongEnough =
+      pwd.length >= 8 &&
+      /[A-Z]/.test(pwd) &&
+      /[a-z]/.test(pwd) &&
+      /\d/.test(pwd)
+
+    if (!strongEnough) {
+      alert('⚠️ Mot de passe trop faible. Min 8 caractères avec majuscule, minuscule et chiffre.')
+      return
+    }
+
+    try {
+      const { error } = await supabase.auth.updateUser({ password: pwd })
+      if (error) {
+        console.error('❌ Erreur changement mot de passe:', error)
+        alert('❌ Impossible de changer le mot de passe.')
+        return
+      }
+      alert('✅ Mot de passe mis à jour.')
+      setNewPassword('')
+      setConfirmPassword('')
+    } catch (err) {
+      console.error('❌ Erreur réseau:', err)
+      alert('❌ Erreur de connexion.')
+    }
+  }
+
+  const saveUserHandle = async () => {
+    const finalUsername = usernameInput.trim()
+    if (!finalUsername) {
+      alert('⚠️ Le pseudo ne peut pas être vide.')
+      return
+    }
+
+    const finalTag = tagInput.trim()
+    if (!finalTag) {
+      alert('⚠️ Le tag ne peut pas être vide.')
+      return
+    }
+    if (!/^\d{4}$/.test(finalTag)) {
+      alert('⚠️ Le tag doit être 4 chiffres (ex: 1234).')
+      return
+    }
+
+    try {
+      // Vérifier si pseudo#tag déjà utilisé par quelqu'un d'autre
+      const { data: dup, error: dupErr } = await supabase
+        .from('profiles')
+        .select('user_id')
+        .eq('username', finalUsername)
+        .eq('tag', finalTag)
+        .limit(1)
+
+      if (dupErr) {
+        console.error('❌ Erreur vérif doublon:', dupErr)
+      }
+      if (dup && dup.length > 0 && dup[0].user_id !== session?.user?.id) {
+        alert('⚠️ Ce pseudo#tag est déjà utilisé. Essayez un autre tag.')
+        return
+      }
+
+      // Upsert par user_id (une fiche par utilisateur)
+      const { data: existing } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('user_id', session!.user!.id)
+        .limit(1)
+
+      const finalAvatar = selectedAvatar ?? undefined
+      const updatePayload: any = { username: finalUsername, tag: finalTag, ...(finalAvatar ? { avatar: finalAvatar } : {}) }
+
+      if (existing && existing.length > 0) {
+        const { error } = await supabase
+          .from('profiles')
+          .update(updatePayload)
+          .eq('user_id', session!.user!.id)
+
+        if (error) {
+          console.error('❌ Erreur mise à jour profil:', error)
+          alert('❌ Erreur lors de la mise à jour du pseudo.')
+          return
+        }
+      } else {
+        const insertPayload: any = { user_id: session!.user!.id, username: finalUsername, tag: finalTag, ...(finalAvatar ? { avatar: finalAvatar } : {}) }
+        const { error } = await supabase
+          .from('profiles')
+          .insert(insertPayload)
+
+        if (error) {
+          console.error('❌ Erreur création profil:', error)
+          alert("❌ Erreur lors de l'enregistrement du pseudo.")
+          return
+        }
+      }
+
+      setUserProfile((prev) =>
+        prev
+          ? (finalAvatar !== undefined
+              ? { ...prev, username: finalUsername, tag: finalTag, avatar: finalAvatar }
+              : { ...prev, username: finalUsername, tag: finalTag })
+          : prev
+      )
+      setShowProfileModal(false)
+    } catch (err) {
+      console.error('❌ Erreur réseau:', err)
+      alert('❌ Erreur de connexion.')
+    }
+  }
+
   const renameSeason = async (newName: string) => {
     if (!currentSeason || !session?.user?.id) return
 
@@ -312,9 +446,26 @@ function App() {
   }
 
   // Charger les saisons au démarrage
+  const loadUserProfile = async () => {
+    if (!session?.user?.id) return
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .limit(1)
+
+    if (error) {
+      console.error('❌ Erreur chargement profil:', error)
+      return
+    }
+    const row = data && data[0]
+    if (row) setUserProfile(row)
+  }
+
   useEffect(() => {
     if (session?.user?.id) {
       loadSeasons()
+      loadUserProfile()
     }
   }, [session?.user?.id])
 
@@ -427,9 +578,23 @@ function App() {
       <div className="user-header">
         <div className="user-info">
           <div className="user-profile">
-            <div className="profile-icon">👤</div>
-            <span className="user-email-expand">{session?.user?.email}</span>
-          </div>
+              <button 
+              className="profile-icon"
+              title="Mon compte"
+              onClick={() => {
+                setUsernameInput(userProfile?.username || '')
+                setTagInput(userProfile?.tag || '')
+                setSelectedAvatar(userProfile?.avatar || null)
+                setShowProfileModal(true)
+              }}
+            >
+              {userProfile?.avatar ? (
+                <img src={userProfile.avatar} alt="Profil" />
+              ) : (
+                '👤'
+              )}
+            </button>
+            </div>
           <button 
             className="logout-btn"
             onClick={() => setShowLogoutModal(true)}
@@ -763,7 +928,7 @@ function App() {
               border: '2px solid rgba(255, 215, 0, 0.5)',
               padding: '30px',
               borderRadius: '12px',
-              minWidth: '400px',
+              minWidth: '420px',
               textAlign: 'center',
               boxShadow: '0 10px 30px rgba(255, 215, 0, 0.2)',
               backdropFilter: 'blur(10px)'
@@ -1201,6 +1366,150 @@ function App() {
                 >
                   Annuler
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de profil */}
+        {showProfileModal && (
+          <div className="modal-backdrop" onClick={() => setShowProfileModal(false)}>
+            <div className="account-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="account-header">
+                <div className="account-avatar">
+                  {(selectedAvatar || userProfile?.avatar) ? (
+                    <img src={(selectedAvatar || userProfile?.avatar) as string} alt="Aperçu avatar" />
+                  ) : (
+                    <div className="avatar-placeholder">👤</div>
+                  )}
+                </div>
+                <div className="account-title">
+                  <h3>Mon compte</h3>
+                  <p>Gérez votre profil et votre sécurité</p>
+                </div>
+              </div>
+
+              <div className="account-info-grid">
+                <div className="info-row">
+                  <span className="info-icon">✉️</span>
+                  <div className="info-content">{session?.user?.email}</div>
+                </div>
+                <div className="info-row">
+                  <span className="info-icon">🏷️</span>
+                  <div className="info-content">
+                    {userProfile ? `${userProfile.username}#${userProfile.tag}` : 'Pseudo non défini'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="account-section">
+                <h4>Identité publique</h4>
+                <div className="handle-row">
+                  <input
+                    type="text"
+                    placeholder="Pseudo"
+                    value={usernameInput}
+                    onChange={(e) => setUsernameInput(e.target.value)}
+                    className="input"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Tag (4 chiffres)"
+                    value={tagInput}
+                    onChange={(e) => setTagInput(e.target.value)}
+                    className="input tag-input"
+                  />
+                </div>
+                <div className="avatar-grid">
+                  {AVAILABLE_AVATARS.map((url) => (
+                    <button
+                      key={url}
+                      className={`avatar-item ${selectedAvatar === url ? 'selected' : ''}`}
+                      onClick={() => setSelectedAvatar(url)}
+                      title="Choisir cet avatar"
+                    >
+                      <img src={url} alt="Avatar" />
+                    </button>
+                  ))}
+                </div>
+                <div className="section-actions">
+                  <button className="primary-btn" onClick={saveUserHandle}>💾 Enregistrer</button>
+                </div>
+              </div>
+
+              <div className="account-section">
+                <h4>Sécurité</h4>
+                <div className="password-row">
+                  <div className="password-input-wrapper">
+                    <input
+                      type={showPwd ? 'text' : 'password'}
+                      placeholder="Nouveau mot de passe"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="input"
+                    />
+                    <button
+                      className="eye-button"
+                      aria-label="Afficher le mot de passe"
+                      onMouseDown={() => setShowPwd(true)}
+                      onMouseUp={() => setShowPwd(false)}
+                      onMouseLeave={() => setShowPwd(false)}
+                      onTouchStart={() => setShowPwd(true)}
+                      onTouchEnd={() => setShowPwd(false)}
+                    >
+                      {showPwd ? (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/>
+                          <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                      ) : (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/>
+                          <circle cx="12" cy="12" r="3"/>
+                          <path d="M3 3l18 18"/>
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                  <div className="password-input-wrapper">
+                    <input
+                      type={showConfirmPwd ? 'text' : 'password'}
+                      placeholder="Confirmer le mot de passe"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="input"
+                    />
+                    <button
+                      className="eye-button"
+                      aria-label="Afficher le mot de passe"
+                      onMouseDown={() => setShowConfirmPwd(true)}
+                      onMouseUp={() => setShowConfirmPwd(false)}
+                      onMouseLeave={() => setShowConfirmPwd(false)}
+                      onTouchStart={() => setShowConfirmPwd(true)}
+                      onTouchEnd={() => setShowConfirmPwd(false)}
+                    >
+                      {showConfirmPwd ? (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/>
+                          <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                      ) : (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/>
+                          <circle cx="12" cy="12" r="3"/>
+                          <path d="M3 3l18 18"/>
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </div>
+                <div className="section-actions">
+                  <button className="primary-btn" onClick={changePassword}>🔒 Mettre à jour</button>
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button className="secondary-btn" onClick={() => setShowProfileModal(false)}>Fermer</button>
               </div>
             </div>
           </div>
