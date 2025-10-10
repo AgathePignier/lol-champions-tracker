@@ -1980,6 +1980,7 @@ h1 {
   letter-spacing: 0.5px;
   background: linear-gradient(135deg, #fff4c2, #ffd700, #ffb300);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
   text-shadow: 0 2px 12px rgba(255, 191, 0, 0.35);
 }
