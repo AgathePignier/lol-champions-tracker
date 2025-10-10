@@ -1759,9 +1759,6 @@ function App() {
         <div className="modal-backdrop" onClick={() => setShowComparison(false)}>
           <div className="comparison-modal" onClick={(e) => e.stopPropagation()}>
             <div className="comparison-header">
-          <div className="comparison-season">
-            {(currentSeason?.name || 'Aucune saison active')} vs {(friendSeason?.name || 'Aucune saison active')}
-          </div>
           <div className="side left">
                 <div className="header-row">
                   <div className="comparison-avatar">
