@@ -2,6 +2,7 @@ import { useSessionContext, useSupabaseClient } from '@supabase/auth-helpers-rea
 import { useEffect, useState, useRef } from 'react'
 import Auth from '../Auth'
 import './App.css'
+import type { UserProfile } from './types'
 
 // Types
 interface Champion {
@@ -44,6 +45,40 @@ function App() {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showRenameModal, setShowRenameModal] = useState(false)
   const [showLogoutModal, setShowLogoutModal] = useState(false)
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  const [showProfileModal, setShowProfileModal] = useState(false)
+  const [usernameInput, setUsernameInput] = useState('')
+  const [tagInput, setTagInput] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [friendUsername, setFriendUsername] = useState('')
+  const [friendTag, setFriendTag] = useState('')
+  const [friendMessage, setFriendMessage] = useState<string | null>(null)
+  const [pendingNotifCount, setPendingNotifCount] = useState<number>(0)
+  const [showFriendsPanel, setShowFriendsPanel] = useState(false)
+  const [pendingRequests, setPendingRequests] = useState<Array<{ id: number; requester_id: string; requester_handle?: string }>>([]) 
+  const [friends, setFriends] = useState<Array<{ user_id: string; handle: string; avatar?: string }>>([]) 
+  // Ajouts pour la comparaison d'un ami
+  const [selectedFriend, setSelectedFriend] = useState<{ user_id: string; handle: string; avatar?: string } | null>(null)
+  const [friendSeason, setFriendSeason] = useState<Season | null>(null)
+  const [friendChampions, setFriendChampions] = useState<Champion[]>([])
+  const [showComparison, setShowComparison] = useState(false)
+  const [comparisonMessage, setComparisonMessage] = useState<string | null>(null)
+  
+  // Scores ami pour le header de comparaison
+  const friendStatusCounts = friendChampions.reduce((counts, c) => {
+    counts[c.status] = (counts[c.status] || 0) + 1
+    return counts
+  }, {} as Record<string, number>)
+  const friendTotalPoints =
+    (friendStatusCounts.vert || 0) * 3 +
+    (friendStatusCounts.orange || 0) * 2 +
+    (friendStatusCounts.jaune || 0) * 1
+  // Ajouts: états œil et avatar + petites options prédéfinies
+  const [showPwd, setShowPwd] = useState(false)
+  const [showConfirmPwd, setShowConfirmPwd] = useState(false)
+  const [selectedAvatar, setSelectedAvatar] = useState<string | null>(null)
+  const AVAILABLE_AVATARS = ['/avatars/1.png', '/avatars/2.png', '/avatars/3.png', '/avatars/4.png', '/avatars/5.png']
 
   // Fonction pour charger les saisons
   const loadSeasons = async () => {
@@ -212,6 +247,174 @@ function App() {
   }
 
   // Fonction pour renommer une saison
+  const changePassword = async () => {
+    const pwd = newPassword.trim()
+    const confirm = confirmPassword.trim()
+
+    if (!pwd || !confirm) {
+      alert('⚠️ Le mot de passe ne peut pas être vide.')
+      return
+    }
+    if (pwd !== confirm) {
+      alert('⚠️ Les mots de passe ne correspondent pas.')
+      return
+    }
+    // Complexité: min 8, majuscule, minuscule, chiffre
+    const strongEnough =
+      pwd.length >= 8 &&
+      /[A-Z]/.test(pwd) &&
+      /[a-z]/.test(pwd) &&
+      /\d/.test(pwd)
+
+    if (!strongEnough) {
+      alert('⚠️ Mot de passe trop faible. Min 8 caractères avec majuscule, minuscule et chiffre.')
+      return
+    }
+
+    try {
+      const { error } = await supabase.auth.updateUser({ password: pwd })
+      if (error) {
+        console.error('❌ Erreur changement mot de passe:', error)
+        alert('❌ Impossible de changer le mot de passe.')
+        return
+      }
+      alert('✅ Mot de passe mis à jour.')
+      setNewPassword('')
+      setConfirmPassword('')
+    } catch (err) {
+      console.error('❌ Erreur réseau:', err)
+      alert('❌ Erreur de connexion.')
+    }
+  }
+
+  const sendFriendRequest = async () => {
+    if (!session?.user) {
+      setFriendMessage('Connecte-toi pour ajouter des amis.')
+      return
+    }
+    const uname = friendUsername.trim()
+    const tcode = friendTag.trim()
+    if (!uname || !tcode) {
+      setFriendMessage('Renseigne pseudo et code.')
+      return
+    }
+
+    // Cherche le profil cible par username#tag
+    const { data: target, error: findErr } = await supabase
+      .from('profiles')
+      .select('user_id,username,tag')
+      .eq('username', uname)
+      .eq('tag', tcode)
+      .single()
+
+    if (findErr || !target) {
+      setFriendMessage('Profil introuvable.')
+      return
+    }
+    if (target.user_id === session.user.id) {
+      setFriendMessage("Tu ne peux pas t'ajouter toi-même.")
+      return
+    }
+
+    // Crée la demande
+    const { error: insertErr } = await supabase.from('friendships').insert({
+      requester_id: session.user.id,
+      addressee_id: target.user_id,
+      status: 'pending',
+    })
+
+    if (insertErr) {
+      setFriendMessage('Demande déjà envoyée ou erreur.')
+      return
+    }
+
+    setFriendMessage('Demande envoyée ✅')
+    setFriendUsername('')
+    setFriendTag('')
+  }
+
+  const saveUserHandle = async () => {
+    const finalUsername = usernameInput.trim()
+    if (!finalUsername) {
+      alert('⚠️ Le pseudo ne peut pas être vide.')
+      return
+    }
+
+    const finalTag = tagInput.trim()
+    if (!finalTag) {
+      alert('⚠️ Le tag ne peut pas être vide.')
+      return
+    }
+    if (!/^\d{4}$/.test(finalTag)) {
+      alert('⚠️ Le tag doit être 4 chiffres (ex: 1234).')
+      return
+    }
+
+    try {
+      // Vérifier si pseudo#tag déjà utilisé par quelqu'un d'autre
+      const { data: dup, error: dupErr } = await supabase
+        .from('profiles')
+        .select('user_id')
+        .eq('username', finalUsername)
+        .eq('tag', finalTag)
+        .limit(1)
+
+      if (dupErr) {
+        console.error('❌ Erreur vérif doublon:', dupErr)
+      }
+      if (dup && dup.length > 0 && dup[0].user_id !== session?.user?.id) {
+        alert('⚠️ Ce pseudo#tag est déjà utilisé. Essayez un autre tag.')
+        return
+      }
+
+      // Upsert par user_id (une fiche par utilisateur)
+      const { data: existing } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('user_id', session!.user!.id)
+        .limit(1)
+
+      const finalAvatar = selectedAvatar ?? undefined
+      const updatePayload: any = { username: finalUsername, tag: finalTag, ...(finalAvatar ? { avatar: finalAvatar } : {}) }
+
+      if (existing && existing.length > 0) {
+        const { error } = await supabase
+          .from('profiles')
+          .update(updatePayload)
+          .eq('user_id', session!.user!.id)
+
+        if (error) {
+          console.error('❌ Erreur mise à jour profil:', error)
+          alert('❌ Erreur lors de la mise à jour du pseudo.')
+          return
+        }
+      } else {
+        const insertPayload: any = { user_id: session!.user!.id, username: finalUsername, tag: finalTag, ...(finalAvatar ? { avatar: finalAvatar } : {}) }
+        const { error } = await supabase
+          .from('profiles')
+          .insert(insertPayload)
+
+        if (error) {
+          console.error('❌ Erreur création profil:', error)
+          alert("❌ Erreur lors de l'enregistrement du pseudo.")
+          return
+        }
+      }
+
+      setUserProfile((prev) =>
+        prev
+          ? (finalAvatar !== undefined
+              ? { ...prev, username: finalUsername, tag: finalTag, avatar: finalAvatar }
+              : { ...prev, username: finalUsername, tag: finalTag })
+          : prev
+      )
+      setShowProfileModal(false)
+    } catch (err) {
+      console.error('❌ Erreur réseau:', err)
+      alert('❌ Erreur de connexion.')
+    }
+  }
+
   const renameSeason = async (newName: string) => {
     if (!currentSeason || !session?.user?.id) return
 
@@ -312,10 +515,273 @@ function App() {
   }
 
   // Charger les saisons au démarrage
+  const loadPendingRequests = async () => {
+    if (!session?.user?.id) {
+      setPendingNotifCount(0)
+      return
+    }
+    const { count, error } = await supabase
+      .from('friendships')
+      .select('id', { count: 'exact', head: true })
+      .eq('addressee_id', session.user.id)
+      .eq('status', 'pending')
+
+    if (error) {
+      console.error('❌ Erreur chargement notifications:', error)
+      setPendingNotifCount(0)
+      return
+    }
+    setPendingNotifCount(count ?? 0)
+  }
+
+  const loadPendingRequestList = async () => {
+    if (!session?.user?.id) {
+      setPendingRequests([])
+      return
+    }
+    const { data, error } = await supabase
+      .from('friendships')
+      .select('id, requester_id, addressee_id, status, created_at')
+      .eq('addressee_id', session.user.id)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: true })
+
+    if (error) {
+      console.error('❌ Erreur chargement demandes:', error)
+      setPendingRequests([])
+      return
+    }
+    const requesterIds = (data || []).map(r => r.requester_id)
+    if (requesterIds.length === 0) {
+      setPendingRequests([])
+      return
+    }
+
+    const { data: profiles, error: profErr } = await supabase
+      .from('profiles')
+      .select('user_id, username, tag, avatar')
+      .in('user_id', requesterIds)
+
+    if (profErr) {
+      console.error('❌ Erreur chargement profils:', profErr)
+    }
+    const profileMap = new Map<string, { username: string; tag: string }>()
+    for (const p of profiles || []) {
+      profileMap.set(p.user_id, { username: p.username, tag: p.tag })
+    }
+
+    const enriched = (data || []).map(r => ({
+      id: r.id as number,
+      requester_id: r.requester_id as string,
+      requester_handle: profileMap.has(r.requester_id)
+        ? `${profileMap.get(r.requester_id)!.username}#${profileMap.get(r.requester_id)!.tag}`
+        : r.requester_id
+    }))
+    setPendingRequests(enriched)
+  }
+
+  const loadFriends = async () => {
+    if (!session?.user?.id) {
+      setFriends([])
+      return
+    }
+    const me = session.user.id
+    const { data, error } = await supabase
+      .from('friendships')
+      .select('id, requester_id, addressee_id, status')
+      .eq('status', 'accepted')
+      .or(`requester_id.eq.${me},addressee_id.eq.${me}`)
+
+    if (error) {
+      console.error('❌ Erreur chargement amis:', error)
+      setFriends([])
+      return
+    }
+    const otherIds = (data || []).map(row => row.requester_id === me ? row.addressee_id : row.requester_id)
+
+    if (otherIds.length === 0) {
+      setFriends([])
+      return
+    }
+
+    const { data: profiles, error: profErr } = await supabase
+      .from('profiles')
+      .select('user_id, username, tag, avatar')
+      .in('user_id', otherIds)
+
+    if (profErr) {
+      console.error('❌ Erreur profils amis:', profErr)
+      setFriends([])
+      return
+    }
+
+    const friendsList = (profiles || []).map(p => ({
+      user_id: p.user_id as string,
+      handle: `${p.username}#${p.tag}`,
+      avatar: p.avatar as string | undefined
+    }))
+    setFriends(friendsList)
+  }
+
+  const acceptFriendRequest = async (id: number) => {
+    if (!session?.user?.id) return
+    const { error } = await supabase
+      .from('friendships')
+      .update({ status: 'accepted' })
+      .eq('id', id)
+      .eq('addressee_id', session.user.id)
+
+    if (error) {
+      console.error('❌ Erreur acceptation:', error)
+      return
+    }
+    await loadPendingRequests()
+    await loadPendingRequestList()
+    await loadFriends()
+  }
+
+  const rejectFriendRequest = async (id: number) => {
+    if (!session?.user?.id) return
+    const { error } = await supabase
+      .from('friendships')
+      .update({ status: 'rejected' })
+      .eq('id', id)
+      .eq('addressee_id', session.user.id)
+
+    if (error) {
+      console.error('❌ Erreur refus:', error)
+      return
+    }
+    await loadPendingRequests()
+    await loadPendingRequestList()
+    await loadFriends()
+  }
+
+  // Charger la saison active de l'ami
+  const loadFriendCurrentSeason = async (friendUserId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('seasons')
+        .select('*')
+        .eq('user_id', friendUserId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      if (error) {
+        console.error('❌ Erreur saison active ami:', error)
+        return null
+      }
+      return (data && data.length > 0) ? (data[0] as Season) : null
+    } catch (err) {
+      console.error('❌ Erreur réseau saison ami:', err)
+      return null
+    }
+  }
+
+  // Charger les champions + statuts pour la saison active de l'ami
+  const loadFriendChampionData = async (friendUserId: string, friendSeasonId: string) => {
+    try {
+      const { data: championsData, error: championsError } = await supabase
+        .from('champions')
+        .select('*')
+
+      if (championsError) {
+        console.error('❌ Erreur chargement champions (ami):', championsError)
+        return []
+      }
+
+      const { data: statusData, error: statusError } = await supabase
+        .from('champion_status')
+        .select('champion_id, status')
+        .eq('user_id', friendUserId)
+        .eq('season_id', friendSeasonId)
+
+      if (statusError) {
+        console.error('❌ Erreur chargement statuts (ami):', statusError)
+      }
+
+      const statusMap = new Map<string, string>()
+      statusData?.forEach(item => {
+        statusMap.set(item.champion_id, item.status)
+      })
+
+      const merged: Champion[] = (championsData || []).map(champion => ({
+        id: champion.id,
+        name: champion.name,
+        image: champion.image,
+        status: (statusMap.get(champion.id) as Champion['status']) || 'blanc',
+        link_url: champion.link_url,
+        link_text: champion.link_text || 'Guide'
+      }))
+      return merged
+    } catch (err) {
+      console.error('❌ Erreur réseau chargement champions ami:', err)
+      return []
+    }
+  }
+
+  // Démarrer la comparaison avec un ami
+  const startComparison = async (friend: { user_id: string; handle: string; avatar?: string }) => {
+    setSelectedFriend(friend)
+    setComparisonMessage(null)
+    setFriendSeason(null)
+    setFriendChampions([])
+    setShowComparison(true)
+
+    const season = await loadFriendCurrentSeason(friend.user_id)
+    if (!season) {
+      setComparisonMessage('Aucune saison "En cours" pour cet ami.')
+      return
+    }
+    setFriendSeason(season)
+
+    const fc = await loadFriendChampionData(friend.user_id, season.id)
+    if (!fc || fc.length === 0) {
+      setComparisonMessage('Statuts de champions indisponibles pour cet ami.')
+      return
+    }
+    setFriendChampions(fc)
+  }
+
+  const loadUserProfile = async () => {
+    if (!session?.user?.id) return
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .limit(1)
+
+    if (error) {
+      console.error('❌ Erreur chargement profil:', error)
+      return
+    }
+    const row = data && data[0]
+    if (row) setUserProfile(row)
+  }
+
   useEffect(() => {
     if (session?.user?.id) {
       loadSeasons()
+      loadUserProfile()
+      loadPendingRequests()
     }
+  }, [session?.user?.id])
+
+  useEffect(() => {
+    if (session?.user?.id) {
+      loadPendingRequestList()
+      loadFriends()
+    }
+  }, [session?.user?.id])
+
+  useEffect(() => {
+    const i = setInterval(() => {
+      loadPendingRequests()
+      loadPendingRequestList()
+      loadFriends()
+    }, 30000)
+    return () => clearInterval(i)
   }, [session?.user?.id])
 
   // Charger les champions quand la saison change
@@ -426,9 +892,30 @@ function App() {
       {/* Header utilisateur - en haut à droite */}
       <div className="user-header">
         <div className="user-info">
-          <div className="user-profile">
-            <div className="profile-icon">👤</div>
-            <span className="user-email-expand">{session?.user?.email}</span>
+          <div className="user-profile profile-icon-wrapper">
+            {/* Profil */}
+            <button 
+              className="profile-icon"
+              title="Mon compte"
+              onClick={() => {
+                setUsernameInput(userProfile?.username || '')
+                setTagInput(userProfile?.tag || '')
+                setSelectedAvatar(userProfile?.avatar || null)
+                setShowProfileModal(true)
+              }}
+            >
+              {userProfile?.avatar ? (
+                <img src={userProfile.avatar} alt="Profil" />
+              ) : (
+                '👤'
+              )}
+            </button>
+            {userProfile?.username && (
+              <div className="profile-tooltip" aria-hidden="true">
+                {userProfile.username}
+                {userProfile.tag ? `#${userProfile.tag}` : ''}
+              </div>
+            )}
           </div>
           <button 
             className="logout-btn"
@@ -763,7 +1250,7 @@ function App() {
               border: '2px solid rgba(255, 215, 0, 0.5)',
               padding: '30px',
               borderRadius: '12px',
-              minWidth: '400px',
+              minWidth: '420px',
               textAlign: 'center',
               boxShadow: '0 10px 30px rgba(255, 215, 0, 0.2)',
               backdropFilter: 'blur(10px)'
@@ -1201,6 +1688,327 @@ function App() {
                 >
                   Annuler
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Panneau latéral amis */}
+      <div className={`friends-drawer ${showFriendsPanel ? 'open' : ''}`}>
+        <div className="friends-drawer-header">
+          <span>Amis</span>
+          <button className="drawer-close-btn" onClick={() => setShowFriendsPanel(false)}>×</button>
+        </div>
+
+        {/* Liste des demandes et amis */}
+        <h3 className="friends-section-title">Demandes d'amis</h3>
+        <div className="pending-list">
+          {pendingRequests.length === 0 ? (
+            <div className="empty-text">Aucune demande en attente</div>
+          ) : (
+            pendingRequests.map(req => (
+              <div key={req.id} className="friend-row">
+                <div className="friend-handle">{req.requester_handle || req.requester_id}</div>
+                <div className="friend-actions">
+                  <button className="accept-btn" onClick={() => acceptFriendRequest(req.id)}>Accepter</button>
+                  <button className="reject-btn" onClick={() => rejectFriendRequest(req.id)}>Refuser</button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        <h3 className="friends-section-title">Mes amis</h3>
+        <div className="friends-list">
+          {friends.length === 0 ? (
+            <div className="empty-text">Aucun ami pour l'instant</div>
+          ) : (
+            friends.map(fr => (
+              <div key={fr.user_id} className="friend-row">
+                <div className="friend-left">
+                  {fr.avatar ? (
+                    <img src={fr.avatar} alt={fr.handle} className="friend-avatar" />
+                  ) : (
+                    <span className="friend-avatar-fallback">👤</span>
+                  )}
+                  <div className="friend-handle">{fr.handle}</div>
+                </div>
+                <div className="friend-actions">
+                  <button className="accept-btn" onClick={() => startComparison(fr)}>Comparer</button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Bouton flottant "Amis" en bas à droite — déplacé hors du drawer */}
+      <button
+        className={`friends-fab ${pendingNotifCount > 0 ? 'has-notifs' : ''}`}
+        title={pendingNotifCount > 0 ? `${pendingNotifCount} demande${pendingNotifCount > 1 ? 's' : ''} d'ami` : 'Amis'}
+        onClick={() => setShowFriendsPanel(s => !s)}
+      >
+        <span className="friends-fab-icon">👥</span>
+        {pendingNotifCount > 0 && (
+          <span className="friends-fab-badge">{pendingNotifCount}</span>
+        )}
+      </button>
+
+      {/* Modal de comparaison ami */}
+      {showComparison && (
+        <div className="modal-backdrop" onClick={() => setShowComparison(false)}>
+          <div className="comparison-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="comparison-header">
+              <div className="side left">
+                <div className="header-row">
+                  <div className="comparison-avatar">
+                    {userProfile?.avatar ? (
+                      <img src={userProfile.avatar} alt="Moi" />
+                    ) : (
+                      <div className="avatar-placeholder">👤</div>
+                    )}
+                  </div>
+                  <div className="comparison-name">
+                    {userProfile ? `${userProfile.username}#${userProfile.tag}` : 'Moi'}
+                  </div>
+                </div>
+                <div className="comparison-score score-left">{totalPoints}</div>
+              </div>
+
+              <div className="side right">
+                <div className="header-row">
+                  <div className="comparison-name">
+                    {selectedFriend?.handle || 'Ami'}
+                  </div>
+                  <div className="comparison-avatar">
+                    {selectedFriend && (selectedFriend as any).avatar ? (
+                      <img
+                        src={(selectedFriend as any).avatar}
+                        alt={selectedFriend?.handle || 'Ami'}
+                        onError={(e) => {
+                          const img = e.target as HTMLImageElement
+                          img.style.display = 'none'
+                        }}
+                      />
+                    ) : (
+                      <div className="avatar-placeholder">👥</div>
+                    )}
+                  </div>
+                </div>
+                <div className="comparison-score score-right">{friendTotalPoints}</div>
+              </div>
+
+              <div className="vs-divider">
+                <img src="/vs.png" alt="VS" className="vs-image" />
+              </div>
+            </div>
+
+            {comparisonMessage ? (
+              <div className="empty-text" style={{ marginTop: '10px' }}>{comparisonMessage}</div>
+            ) : (
+              <div className="comparison-list">
+                {champions
+                  .filter(ch => {
+                    const fr = friendChampions.find(fc => fc.id === ch.id)
+                    const myStatus = ch.status
+                    const frStatus = fr?.status || 'blanc'
+                    return !(myStatus === 'blanc' && frStatus === 'blanc')
+                  })
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .map(ch => {
+                    const fr = friendChampions.find(fc => fc.id === ch.id)
+                    const myStatus = ch.status
+                    const frStatus: Champion['status'] = (fr?.status as Champion['status']) || 'blanc'
+                    const statusLabel = (s: Champion['status']) =>
+                      s === 'vert' ? '🟢 Top 1'
+                      : s === 'orange' ? '🟠 Top 2-4'
+                      : s === 'jaune' ? '🟡 Top 5-8'
+                      : '⚪ Non joué'
+                    return (
+                      <div key={ch.id} className="comparison-item">
+                        <div className="comparison-side left">
+                          <span className="status-badge" title="Mon statut">{statusLabel(myStatus)}</span>
+                        </div>
+                        <div className="comparison-name">{ch.name}</div>
+                        <div className="comparison-side right">
+                          <span className="status-badge" title="Statut de l'ami">{statusLabel(frStatus)}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+              </div>
+            )}
+
+            <div className="modal-footer">
+              <button className="secondary-btn" onClick={() => setShowComparison(false)}>Fermer</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de profil */}
+      {showProfileModal && (
+          <div className="modal-backdrop" onClick={() => setShowProfileModal(false)}>
+            <div className="account-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="account-header">
+                <div className="account-avatar">
+                  {(selectedAvatar || userProfile?.avatar) ? (
+                    <img src={(selectedAvatar || userProfile?.avatar) as string} alt="Aperçu avatar" />
+                  ) : (
+                    <div className="avatar-placeholder">👤</div>
+                  )}
+                </div>
+                <div className="account-title">
+                  <h3>Mon compte</h3>
+                  <p>Gérez votre profil et votre sécurité</p>
+                </div>
+              </div>
+
+              <div className="account-info-grid">
+                <div className="info-row">
+                  <span className="info-icon">✉️</span>
+                  <div className="info-content">{session?.user?.email}</div>
+                </div>
+                <div className="info-row">
+                  <span className="info-icon">🏷️</span>
+                  <div className="info-content">
+                    {userProfile ? `${userProfile.username}#${userProfile.tag}` : 'Pseudo non défini'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="account-section">
+                <h4>Identité publique</h4>
+                <div className="handle-row">
+                  <input
+                    type="text"
+                    placeholder="Pseudo"
+                    value={usernameInput}
+                    onChange={(e) => setUsernameInput(e.target.value)}
+                    className="input"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Tag (4 chiffres)"
+                    value={tagInput}
+                    onChange={(e) => setTagInput(e.target.value)}
+                    className="input tag-input"
+                  />
+                </div>
+                <div className="avatar-grid">
+                  {AVAILABLE_AVATARS.map((url) => (
+                    <button
+                      key={url}
+                      className={`avatar-item ${selectedAvatar === url ? 'selected' : ''}`}
+                      onClick={() => setSelectedAvatar(url)}
+                      title="Choisir cet avatar"
+                    >
+                      <img src={url} alt="Avatar" />
+                    </button>
+                  ))}
+                </div>
+                <div className="section-actions">
+                  <button className="primary-btn" onClick={saveUserHandle}>💾 Enregistrer</button>
+                </div>
+              </div>
+
+              <div className="account-section">
+                <h4>Sécurité</h4>
+                <div className="password-row">
+                  <div className="password-input-wrapper">
+                    <input
+                      type={showPwd ? 'text' : 'password'}
+                      placeholder="Nouveau mot de passe"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="input"
+                    />
+                    <button
+                      className="eye-button"
+                      aria-label="Afficher le mot de passe"
+                      onMouseDown={() => setShowPwd(true)}
+                      onMouseUp={() => setShowPwd(false)}
+                      onMouseLeave={() => setShowPwd(false)}
+                      onTouchStart={() => setShowPwd(true)}
+                      onTouchEnd={() => setShowPwd(false)}
+                    >
+                      {showPwd ? (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/>
+                          <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                      ) : (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/>
+                          <circle cx="12" cy="12" r="3"/>
+                          <path d="M3 3l18 18"/>
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                  <div className="password-input-wrapper">
+                    <input
+                      type={showConfirmPwd ? 'text' : 'password'}
+                      placeholder="Confirmer le mot de passe"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="input"
+                    />
+                    <button
+                      className="eye-button"
+                      aria-label="Afficher le mot de passe"
+                      onMouseDown={() => setShowConfirmPwd(true)}
+                      onMouseUp={() => setShowConfirmPwd(false)}
+                      onMouseLeave={() => setShowConfirmPwd(false)}
+                      onTouchStart={() => setShowConfirmPwd(true)}
+                      onTouchEnd={() => setShowConfirmPwd(false)}
+                    >
+                      {showConfirmPwd ? (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/>
+                          <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                      ) : (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/>
+                          <circle cx="12" cy="12" r="3"/>
+                          <path d="M3 3l18 18"/>
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </div>
+                <div className="section-actions">
+                  <button className="primary-btn" onClick={changePassword}>🔒 Mettre à jour</button>
+                </div>
+              </div>
+
+              {/* === Ajouter un ami === */}
+              <div className="friends-add">
+                <div className="friends-title">Ajouter un ami</div>
+                <div className="friend-form">
+                  <input
+                    type="text"
+                    placeholder="Pseudo"
+                    value={friendUsername}
+                    onChange={(e) => setFriendUsername(e.target.value)}
+                  />
+                  <span className="hash-sep">#</span>
+                  <input
+                    type="text"
+                    placeholder="Code"
+                    value={friendTag}
+                    onChange={(e) => setFriendTag(e.target.value)}
+                  />
+                  <button type="button" className="friend-send" onClick={sendFriendRequest}>
+                    Envoyer
+                  </button>
+                </div>
+                {friendMessage && <div className="friend-message">{friendMessage}</div>}
+              </div>
+
+              <div className="modal-footer">
+                <button className="secondary-btn" onClick={() => setShowProfileModal(false)}>Fermer</button>
               </div>
             </div>
           </div>
