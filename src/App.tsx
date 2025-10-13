@@ -60,7 +60,7 @@ function App() {
   const [friends, setFriends] = useState<Array<{ user_id: string; handle: string; avatar?: string }>>([]) 
   // Ajouts pour la comparaison d'un ami
   const [selectedFriend, setSelectedFriend] = useState<{ user_id: string; handle: string; avatar?: string } | null>(null)
-  const [friendSeason, setFriendSeason] = useState<Season | null>(null)
+  const [, setFriendSeason] = useState<Season | null>(null)
   const [friendChampions, setFriendChampions] = useState<Champion[]>([])
   const [showComparison, setShowComparison] = useState(false)
   const [comparisonMessage, setComparisonMessage] = useState<string | null>(null)
