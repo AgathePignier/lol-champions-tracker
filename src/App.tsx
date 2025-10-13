@@ -78,7 +78,7 @@ function App() {
   const [showPwd, setShowPwd] = useState(false)
   const [showConfirmPwd, setShowConfirmPwd] = useState(false)
   const [selectedAvatar, setSelectedAvatar] = useState<string | null>(null)
-  const AVAILABLE_AVATARS = ['/avatars/1.png', '/avatars/2.png', '/avatars/3.png', '/avatars/4.png', '/avatars/5.png']
+  const AVAILABLE_AVATARS = ['/avatars/1.png','/avatars/2.png','/avatars/3.png','/avatars/4.png','/avatars/5.png','/avatars/6.png']
 
   // Fonction pour charger les saisons
   const loadSeasons = async () => {
@@ -1700,6 +1700,30 @@ function App() {
           <button className="drawer-close-btn" onClick={() => setShowFriendsPanel(false)}>×</button>
         </div>
 
+        {/* === Ajouter un ami (déplacé ici) === */}
+        <div className="friends-add">
+          <div className="friends-title">Ajouter un ami</div>
+          <div className="friend-form">
+            <input
+              type="text"
+              placeholder="Pseudo"
+              value={friendUsername}
+              onChange={(e) => setFriendUsername(e.target.value)}
+            />
+            <span className="hash-sep">#</span>
+            <input
+              type="text"
+              placeholder="Code"
+              value={friendTag}
+              onChange={(e) => setFriendTag(e.target.value)}
+            />
+            <button type="button" className="friend-send" onClick={sendFriendRequest}>
+              Envoyer
+            </button>
+          </div>
+          {friendMessage && <div className="friend-message">{friendMessage}</div>}
+        </div>
+
         {/* Liste des demandes et amis */}
         <h3 className="friends-section-title">Demandes d'amis</h3>
         <div className="pending-list">
@@ -1983,29 +2007,6 @@ function App() {
                 </div>
               </div>
 
-              {/* === Ajouter un ami === */}
-              <div className="friends-add">
-                <div className="friends-title">Ajouter un ami</div>
-                <div className="friend-form">
-                  <input
-                    type="text"
-                    placeholder="Pseudo"
-                    value={friendUsername}
-                    onChange={(e) => setFriendUsername(e.target.value)}
-                  />
-                  <span className="hash-sep">#</span>
-                  <input
-                    type="text"
-                    placeholder="Code"
-                    value={friendTag}
-                    onChange={(e) => setFriendTag(e.target.value)}
-                  />
-                  <button type="button" className="friend-send" onClick={sendFriendRequest}>
-                    Envoyer
-                  </button>
-                </div>
-                {friendMessage && <div className="friend-message">{friendMessage}</div>}
-              </div>
 
               <div className="modal-footer">
                 <button className="secondary-btn" onClick={() => setShowProfileModal(false)}>Fermer</button>

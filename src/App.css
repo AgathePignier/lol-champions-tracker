@@ -1145,6 +1145,8 @@ h1 {
   flex-direction: column;
   padding: 16px;
   color: #fff;
+  box-sizing: border-box;              /* largeur stable (inclut padding) */
+  overflow-x: hidden;                  /* pas de débordement horizontal */
 }
 
 .friends-drawer.open {
@@ -1336,6 +1338,7 @@ h1 {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;                     /* passe à la ligne si nécessaire */
 }
 
 .friend-form input {
@@ -1346,10 +1349,14 @@ h1 {
   background: rgba(255,255,255,0.08);
   border: 1px solid rgba(255,255,255,0.12);
   color: #fff;
+  box-sizing: border-box;              /* largeur fiable inter-navigateurs */
+  flex: 1 1 120px;                     /* peut rétrécir pour tenir dans 360px */
+  min-width: 90px;                     /* reste utilisable en étroit */
 }
 
 .hash-sep {
   opacity: 0.6;
+  flex: 0 0 auto;                      /* évite le rétrécissement du '#' */
 }
 
 .friend-send {
@@ -1359,6 +1366,9 @@ h1 {
   border: 1px solid rgba(255,255,255,0.18);
   background: rgba(255,255,255,0.12);
   color: #fff;
+  flex: 0 0 auto;                      /* taille du bouton fixe */
+  margin-left: auto;                   /* à droite si sur la même ligne */
+  margin-top: 8px;                     /* espacement si le bouton passe dessous */
 }
 
 .friend-message {
