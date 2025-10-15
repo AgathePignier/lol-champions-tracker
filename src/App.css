@@ -3,6 +3,7 @@ html, body, #root {
   height: 100%;
   margin: 0;
   padding: 0;
+  caret-color: transparent;
 }
 
 /* === APP CONTAINER === */
@@ -792,6 +793,24 @@ h1 {
   overflow: hidden;
   color: #ffffff;
   scroll-snap-align: start;
+  position: relative;
+}
+
+.top1-overlay-count {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  pointer-events: none;
+  color: #fff;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  font-size: 16px;
+  background: rgba(0, 0, 0, 0.30);
+  padding: 4px 10px;
+  border-radius: 10px;
 }
 
 .champion-card:last-child {
@@ -889,8 +908,16 @@ h1 {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;           /* permet de passer le bloc suivant à la ligne */
 }
-
+.top1-controls.below-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 0;           /* en dessous, pas besoin de décalage */
+  margin-top: 6px;          /* petit espace sous le libellé de statut */
+  width: auto;
+}
 .champion-link-btn {
   display: flex;
   align-items: center;
@@ -1891,6 +1918,55 @@ h1 {
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
+/* Statistiques dans le modal de comparaison */
+.comparison-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 8px 0 16px;
+}
+
+.stats-card {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.stats-title {
+  font-weight: 600;
+  color: #ffd700;
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.stats-items {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  row-gap: 6px;
+  column-gap: 8px;
+}
+
+.stats-item {
+  display: contents; /* aligne label + valeur sur la grille */
+}
+
+.stats-label {
+  color: #ddd;
+}
+
+.stats-value {
+  color: #fff;
+  font-weight: 700;
+  text-align: right;
+}
+
+@media (max-width: 560px) {
+  .comparison-stats {
+    grid-template-columns: 1fr; /* empile les cartes */
+  }
+}
+
 .comparison-header {
   justify-content: space-between;
   position: relative;
@@ -2036,4 +2112,66 @@ h1 {
     width: 64px;
     height: 64px;
   }
+}
+
+.status-block {
+  display: flex;
+  flex-direction: column;   /* statut au-dessus */
+  align-items: center;      /* centre horizontalement le statut et les contrôles */
+  gap: 6px;
+}
+
+/* annule un éventuel flex-basis:100% posé précédemment */
+.champion-right .status-block .top1-controls {
+  flex-basis: auto;
+  margin-top: 0;
+}
+
+.top1-controls {
+  display: flex;
+  justify-content: center;  /* centre les boutons dans leur ligne */
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  flex-basis: auto;
+  margin-left: 0;
+  margin-right: 0;
+}
+/* Bouton +1 (déjà présent) */
+.top1-increment {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(40, 167, 69, 0.20);
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.top1-increment:hover {
+  background: rgba(40, 167, 69, 0.35);
+  border-color: rgba(40, 167, 69, 0.50);
+}
+
+/* Ajout: bouton − discret */
+.top1-decrement {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.10);
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  opacity: 0.75;            /* discret */
+}
+.top1-decrement:hover {
+  opacity: 1;
+  background: rgba(255,255,255,0.16);
+}
+
+.top1-count {
+  color: #fff;
+  font-weight: 700;
+  opacity: 0.95;
 }

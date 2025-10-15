@@ -4,6 +4,7 @@ import './src/Auth.css'
 
 export default function Auth() {
   const [email, setEmail] = useState('')
+  const [pseudo, setPseudo] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -34,7 +35,14 @@ export default function Auth() {
     setError(null)
     
     try {
-      const { error } = await supabase.auth.signUp({ email, password })
+      const desired = (pseudo || (email.split('@')[0] || '')).trim()
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { desired_username: desired } // stocke le pseudo voulu en metadata
+        }
+      })
       if (error) {
         console.error('❌ Erreur d\'inscription:', error)
         setError(error.message)
@@ -102,7 +110,19 @@ export default function Auth() {
               className="auth-input"
             />
           </div>
-          
+          {/* Champ Pseudo affiché uniquement en inscription */}
+          {isSignUp && (
+            <div className="input-group">
+              <input
+                type="text"
+                placeholder="Pseudo"
+                value={pseudo}
+                onChange={e => setPseudo(e.target.value)}
+                disabled={loading}
+                className="auth-input"
+              />
+            </div>
+          )}
           <div className="input-group">
             <input
               type="password"
@@ -116,7 +136,7 @@ export default function Auth() {
           
           <button 
             onClick={isSignUp ? handleSignup : handleLogin}
-            disabled={loading || !email || !password}
+            disabled={loading || !email || !password || (isSignUp && !pseudo)}
             className="auth-btn primary"
           >
             {loading ? (

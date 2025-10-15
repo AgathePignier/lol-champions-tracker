@@ -6,6 +6,7 @@ import type { UserProfile } from './types'
 
 // Types
 interface Champion {
+  top1_count?: number;
   id: string;
   name: string;
   status: 'blanc' | 'jaune' | 'orange' | 'vert';
@@ -28,16 +29,100 @@ function App() {
   const { session, isLoading } = useSessionContext()
   const supabase = useSupabaseClient()
   const championsScrollRef = useRef<HTMLDivElement>(null)
-  
+
   const [champions, setChampions] = useState<Champion[]>([])
   const [sortBy, setSortBy] = useState<'name' | 'status'>('name')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(false)
-  
+
+  const incrementTop1 = async (championId: string) => {
+    if (!currentSeason || !session?.user?.id) return
+    const champion = champions.find(c => c.id === championId)
+    if (!champion) return
+
+    if (champion.status !== 'vert') {
+      alert('⚠️ Tu dois être Top 1 sur ce champion pour incrémenter.')
+      return
+    }
+
+    try {
+      const base = Math.max(1, champion.top1_count ?? 1) // min 1 si vert
+      const newCount = base + 1
+
+      // mise à jour locale
+      setChampions(prev =>
+        prev.map(c =>
+          c.id === championId ? { ...c, top1_count: newCount } : c
+        )
+      )
+
+      // upsert avec compteur + 1 (status vert garanti)
+      const { error } = await supabase
+        .from('champion_status')
+        .upsert({
+          user_id: session.user.id,
+          champion_id: championId,
+          season_id: currentSeason.id,
+          status: 'vert',
+          top1_count: newCount
+        })
+
+      if (error) {
+        console.error('❌ Erreur incrément Top1:', error)
+        alert("❌ Impossible d'incrémenter le compteur Top 1.")
+        return
+      }
+    } catch (err) {
+      console.error('❌ Erreur réseau incrément Top1:', err)
+      alert('❌ Erreur réseau.')
+    }
+  }
+  const decrementTop1 = async (championId: string) => {
+    if (!currentSeason || !session?.user?.id) return
+    const champion = champions.find(c => c.id === championId)
+    if (!champion) return
+
+    if (champion.status !== 'vert') {
+      alert('⚠️ Top 1 requis pour ajuster le compteur.')
+      return
+    }
+
+    try {
+      const isTop1 = champion.status === 'vert'
+      const base = champion.top1_count ?? 1
+      const newCount = isTop1 ? Math.max(1, base - 1) : Math.max(0, base - 1)
+
+      // mise à jour locale
+      setChampions(prev =>
+        prev.map(c =>
+          c.id === championId ? { ...c, top1_count: newCount } : c
+        )
+      )
+
+      const { error } = await supabase
+        .from('champion_status')
+        .upsert({
+          user_id: session.user.id,
+          champion_id: championId,
+          season_id: currentSeason.id,
+          status: 'vert',
+          top1_count: newCount
+        })
+
+      if (error) {
+        console.error('❌ Erreur décrément Top1:', error)
+        alert("❌ Impossible de diminuer le compteur Top 1.")
+        return
+      }
+    } catch (err) {
+      console.error('❌ Erreur réseau décrément Top1:', err)
+      alert('❌ Erreur réseau.')
+    }
+  }
   // États pour les filtres
   const [statusFilters, setStatusFilters] = useState<Set<Champion['status']>>(new Set(['blanc', 'jaune', 'orange', 'vert']))
-  
+
   // États pour les saisons
   const [seasons, setSeasons] = useState<Season[]>([])
   const [currentSeason, setCurrentSeason] = useState<Season | null>(null)
@@ -56,15 +141,15 @@ function App() {
   const [friendMessage, setFriendMessage] = useState<string | null>(null)
   const [pendingNotifCount, setPendingNotifCount] = useState<number>(0)
   const [showFriendsPanel, setShowFriendsPanel] = useState(false)
-  const [pendingRequests, setPendingRequests] = useState<Array<{ id: number; requester_id: string; requester_handle?: string }>>([]) 
-  const [friends, setFriends] = useState<Array<{ user_id: string; handle: string; avatar?: string }>>([]) 
+  const [pendingRequests, setPendingRequests] = useState<Array<{ id: number; requester_id: string; requester_handle?: string }>>([])
+  const [friends, setFriends] = useState<Array<{ user_id: string; handle: string; avatar?: string }>>([])
   // Ajouts pour la comparaison d'un ami
   const [selectedFriend, setSelectedFriend] = useState<{ user_id: string; handle: string; avatar?: string } | null>(null)
   const [, setFriendSeason] = useState<Season | null>(null)
   const [friendChampions, setFriendChampions] = useState<Champion[]>([])
   const [showComparison, setShowComparison] = useState(false)
   const [comparisonMessage, setComparisonMessage] = useState<string | null>(null)
-  
+
   // Scores ami pour le header de comparaison
   const friendStatusCounts = friendChampions.reduce((counts, c) => {
     counts[c.status] = (counts[c.status] || 0) + 1
@@ -78,7 +163,7 @@ function App() {
   const [showPwd, setShowPwd] = useState(false)
   const [showConfirmPwd, setShowConfirmPwd] = useState(false)
   const [selectedAvatar, setSelectedAvatar] = useState<string | null>(null)
-  const AVAILABLE_AVATARS = ['/avatars/1.png','/avatars/2.png','/avatars/3.png','/avatars/4.png','/avatars/5.png','/avatars/6.png']
+  const AVAILABLE_AVATARS = ['/avatars/1.png', '/avatars/2.png', '/avatars/3.png', '/avatars/4.png', '/avatars/5.png', '/avatars/6.png']
 
   // Fonction pour charger les saisons
   const loadSeasons = async () => {
@@ -97,7 +182,7 @@ function App() {
       }
 
       setSeasons(data || [])
-      
+
       // Trouver la saison active
       const activeSeason = data?.find((s: Season) => s.is_active)
       console.log('🔍 Saisons trouvées:', data?.length)
@@ -112,8 +197,8 @@ function App() {
   // Fonction pour vérifier si un nom de saison existe déjà
   const checkSeasonNameExists = (name: string, excludeId?: string): boolean => {
     const trimmedName = name.trim().toLowerCase()
-    return seasons.some(season => 
-      season.name.toLowerCase() === trimmedName && 
+    return seasons.some(season =>
+      season.name.toLowerCase() === trimmedName &&
       season.id !== excludeId
     )
   }
@@ -139,9 +224,9 @@ function App() {
       if (currentSeason) {
         await supabase
           .from('seasons')
-          .update({ 
-            is_active: false, 
-            end_date: new Date().toISOString() 
+          .update({
+            is_active: false,
+            end_date: new Date().toISOString()
           })
           .eq('id', currentSeason.id)
       }
@@ -164,7 +249,7 @@ function App() {
       }
 
       console.log('✅ Nouvelle saison créée:', data)
-      
+
       // 3. Recharger les données
       await loadSeasons()
       await loadChampionData()
@@ -223,7 +308,7 @@ function App() {
       if (remainingSeasons && remainingSeasons.length > 0) {
         // Vérifier s'il y a encore une saison active
         const hasActiveSeason = remainingSeasons.some(s => s.is_active)
-        
+
         if (!hasActiveSeason) {
           // Activer la saison la plus récente
           const mostRecentSeason = remainingSeasons[0]
@@ -231,9 +316,9 @@ function App() {
             .from('seasons')
             .update({ is_active: true })
             .eq('id', mostRecentSeason.id)
-          
+
           console.log('✅ Saison la plus récente activée:', mostRecentSeason.name)
-          
+
           // Recharger les saisons pour refléter le changement
           await loadSeasons()
         }
@@ -404,8 +489,8 @@ function App() {
       setUserProfile((prev) =>
         prev
           ? (finalAvatar !== undefined
-              ? { ...prev, username: finalUsername, tag: finalTag, avatar: finalAvatar }
-              : { ...prev, username: finalUsername, tag: finalTag })
+            ? { ...prev, username: finalUsername, tag: finalTag, avatar: finalAvatar }
+            : { ...prev, username: finalUsername, tag: finalTag })
           : prev
       )
       setShowProfileModal(false)
@@ -465,7 +550,6 @@ function App() {
     console.log('🔄 Chargement des champions pour la saison:', currentSeason.name)
 
     try {
-      // 1. Charger tous les champions depuis la table champions
       const { data: championsData, error: championsError } = await supabase
         .from('champions')
         .select('*')
@@ -475,12 +559,9 @@ function App() {
         return
       }
 
-      console.log('✅ Champions chargés:', championsData)
-
-      // 2. Charger les statuts pour cet utilisateur ET cette saison
       const { data: statusData, error: statusError } = await supabase
         .from('champion_status')
-        .select('champion_id, status')
+        .select('champion_id, status, top1_count')
         .eq('user_id', session.user.id)
         .eq('season_id', currentSeason.id)
 
@@ -488,20 +569,21 @@ function App() {
         console.error('❌ Erreur chargement statuts:', statusError)
       }
 
-      // 3. Créer un map des statuts
       const statusMap = new Map<string, string>()
+      const countMap = new Map<string, number>()
       statusData?.forEach(item => {
         statusMap.set(item.champion_id, item.status)
+        countMap.set(item.champion_id, item.top1_count ?? 0)
       })
 
-      // 4. Combiner champions + statuts + liens
       const championsWithStatus: Champion[] = championsData?.map(champion => ({
         id: champion.id,
         name: champion.name,
         image: champion.image,
         status: (statusMap.get(champion.id) as Champion['status']) || 'blanc',
         link_url: champion.link_url,
-        link_text: champion.link_text || 'Guide'
+        link_text: champion.link_text || 'Guide',
+        top1_count: countMap.get(champion.id) ?? 0
       })) || []
 
       setChampions(championsWithStatus)
@@ -693,7 +775,7 @@ function App() {
 
       const { data: statusData, error: statusError } = await supabase
         .from('champion_status')
-        .select('champion_id, status')
+        .select('champion_id, status, top1_count')
         .eq('user_id', friendUserId)
         .eq('season_id', friendSeasonId)
 
@@ -702,8 +784,10 @@ function App() {
       }
 
       const statusMap = new Map<string, string>()
+      const countMap = new Map<string, number>()
       statusData?.forEach(item => {
         statusMap.set(item.champion_id, item.status)
+        countMap.set(item.champion_id, item.top1_count ?? 0)
       })
 
       const merged: Champion[] = (championsData || []).map(champion => ({
@@ -712,7 +796,8 @@ function App() {
         image: champion.image,
         status: (statusMap.get(champion.id) as Champion['status']) || 'blanc',
         link_url: champion.link_url,
-        link_text: champion.link_text || 'Guide'
+        link_text: champion.link_text || 'Guide',
+        top1_count: countMap.get(champion.id) ?? 0
       }))
       return merged
     } catch (err) {
@@ -768,6 +853,67 @@ function App() {
     }
   }, [session?.user?.id])
 
+  // Création auto du profil après authentification (pseudo + tag unique)
+  useEffect(() => {
+    const ensureProfileAfterAuth = async () => {
+      if (!session?.user?.id) return
+
+      // Vérifie s'il existe déjà un profil
+      const { data: existing, error: existErr } = await supabase
+        .from('profiles')
+        .select('user_id, username, tag')
+        .eq('user_id', session.user.id)
+        .limit(1)
+
+      if (existErr) {
+        console.error('❌ Erreur vérif profil:', existErr)
+        return
+      }
+      if (existing && existing.length > 0) {
+        // profil déjà présent
+        return
+      }
+
+      // Récupère le pseudo souhaité (metadata posée au signUp)
+      const desired =
+        (session.user.user_metadata?.desired_username as string | undefined)?.trim() ||
+        (session.user.email?.split('@')[0] || 'Player')
+
+      // Trouve un tag libre pour ce pseudo
+      const genTagCandidate = () => String(Math.floor(1000 + Math.random() * 9000))
+      let finalTag = genTagCandidate()
+      for (let tries = 0; tries < 20; tries++) {
+        const { data: collision } = await supabase
+          .from('profiles')
+          .select('user_id')
+          .eq('username', desired)
+          .eq('tag', finalTag)
+          .limit(1)
+        if (!collision || collision.length === 0) break
+        finalTag = genTagCandidate()
+      }
+
+      // Insère le profil
+      const { error: insertErr } = await supabase
+        .from('profiles')
+        .insert({
+          user_id: session.user.id,
+          username: desired,
+          tag: finalTag
+        })
+
+      if (insertErr) {
+        console.error('❌ Erreur création profil auto:', insertErr)
+      } else {
+        console.log(`✅ Profil créé: ${desired}#${finalTag}`)
+        // rafraîchit l'état local
+        await loadUserProfile()
+      }
+    }
+
+    ensureProfileAfterAuth()
+  }, [session])
+
   useEffect(() => {
     if (session?.user?.id) {
       loadPendingRequestList()
@@ -801,9 +947,44 @@ function App() {
     const currentIndex = statusOrder.indexOf(champion.status)
     const nextStatus = statusOrder[(currentIndex + 1) % statusOrder.length]
 
+    // si passage à vert pour la première fois, impose ×1
+    if (nextStatus === 'vert') {
+      const current = champions.find(c => c.id === championId)
+      const ensuredCount = Math.max(1, current?.top1_count ?? 0)
+
+      // met à jour l'état local
+      setChampions(prev =>
+        prev.map(c =>
+          c.id === championId ? { ...c, status: 'vert', top1_count: ensuredCount } : c
+        )
+      )
+
+      // persiste le statut + top1_count
+      try {
+        const { error } = await supabase
+          .from('champion_status')
+          .upsert({
+            user_id: session?.user?.id,
+            champion_id: championId,
+            status: 'vert',
+            season_id: currentSeason.id,
+            top1_count: ensuredCount
+          })
+
+        if (error) {
+          console.error('❌ Erreur Supabase:', error)
+        } else {
+          console.log(`✅ Statut sauvegardé: ${champion.name} → vert (×${ensuredCount})`)
+        }
+      } catch (err) {
+        console.error('❌ Erreur réseau:', err)
+      }
+      return
+    }
+
     // Mise à jour locale immédiate
     setChampions(prevChampions =>
-      prevChampions.map(c => 
+      prevChampions.map(c =>
         c.id === championId ? { ...c, status: nextStatus } : c
       )
     )
@@ -837,20 +1018,20 @@ function App() {
 
   const sortedChampions = [...filteredChampions].sort((a, b) => {
     let comparison = 0;
-    
+
     if (sortBy === 'name') {
       comparison = a.name.localeCompare(b.name)
     } else {
       // Tri par statut avec ordre personnalisé : vert, orange, jaune, blanc
       const statusOrder = { 'vert': 0, 'orange': 1, 'jaune': 2, 'blanc': 3 };
       comparison = statusOrder[a.status] - statusOrder[b.status];
-      
+
       // Si les statuts sont identiques, trier par ordre alphabétique
       if (comparison === 0) {
         comparison = a.name.localeCompare(b.name);
       }
     }
-    
+
     // Inverser si direction descendante
     return sortDirection === 'desc' ? -comparison : comparison
   })
@@ -871,10 +1052,10 @@ function App() {
   // À la fin du composant, avant le return final
   if (isLoading) {
     return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
         height: '100vh',
         fontSize: '1.2em'
       }}>
@@ -894,7 +1075,7 @@ function App() {
         <div className="user-info">
           <div className="user-profile profile-icon-wrapper">
             {/* Profil */}
-            <button 
+            <button
               className="profile-icon"
               title="Mon compte"
               onClick={() => {
@@ -917,7 +1098,7 @@ function App() {
               </div>
             )}
           </div>
-          <button 
+          <button
             className="logout-btn"
             onClick={() => setShowLogoutModal(true)}
             title="Déconnexion"
@@ -932,13 +1113,13 @@ function App() {
         {/* Header avec titre et saisons */}
         <div className="header">
           <h1>🏆 Stats Arena</h1>
-          
+
           {/* Contrôles des saisons - bloc unifié */}
           <div className="season-selector">
             <span className="season-label">Saison:</span>
-            <select 
+            <select
               className="season-dropdown"
-              value={currentSeason?.id || ''} 
+              value={currentSeason?.id || ''}
               onChange={(e) => {
                 const season = seasons.find(s => s.id === e.target.value)
                 setCurrentSeason(season || null)
@@ -951,8 +1132,8 @@ function App() {
                 </option>
               ))}
             </select>
-            
-            <button 
+
+            <button
               onClick={() => setShowSeasonModal(true)}
               className="season-control-btn new-season-btn"
               title="Nouvelle Saison"
@@ -962,7 +1143,7 @@ function App() {
 
             {/* Bouton de modification - visible seulement si une saison est sélectionnée */}
             {currentSeason && (
-              <button 
+              <button
                 onClick={() => setShowRenameModal(true)}
                 className="season-control-btn rename-season-btn"
                 title="Renommer la saison"
@@ -973,7 +1154,7 @@ function App() {
 
             {/* Bouton de suppression - visible seulement si une saison est sélectionnée */}
             {currentSeason && (
-              <button 
+              <button
                 onClick={() => setShowDeleteModal(true)}
                 className="season-control-btn delete-season-btn"
                 title="Supprimer"
@@ -1097,7 +1278,7 @@ function App() {
                   ⚪ Non joué
                 </button>
               </div>
-              
+
               {/* Boutons de raccourci */}
               <div className="filter-shortcuts">
                 <button
@@ -1122,7 +1303,7 @@ function App() {
             <h2 className="champions-title">
               Champions {searchQuery && `(${sortedChampions.length} résultat${sortedChampions.length > 1 ? 's' : ''})`}
             </h2>
-            
+
             {/* Barre de recherche */}
             <div className="search-container">
               <input
@@ -1153,8 +1334,9 @@ function App() {
                       key={champion.id}
                       className={`champion-card ${champion.status}`}
                       onClick={() => handleStatusChange(champion.id)}
+                      style={{ position: 'relative' }}
                     >
-                      <img 
+                      <img
                         src={champion.image}
                         alt={champion.name}
                         className="champion-image"
@@ -1167,26 +1349,68 @@ function App() {
                       <div className="champion-info">
                         <h3>{champion.name}</h3>
                         <div className="champion-right">
-                          {champion.link_url && (
-                            <a
-                              href={champion.link_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="champion-link-btn"
-                              title="--> Build"
-                              onClick={(e) => e.stopPropagation()} // Empêche le changement de statut
-                            >
-                              🔗
-                            </a>
-                          )}
-                          <div className="status">
-                            {champion.status === 'vert' && '🟢 Top 1'}
-                            {champion.status === 'orange' && '🟠 Top 2-4'}
-                            {champion.status === 'jaune' && '🟡 Top 5-8'}
-                            {champion.status === 'blanc' && '⚪ Non joué'}
-                          </div>
+                            {champion.link_url && (
+                              <a
+                                href={champion.link_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="champion-link-btn"
+                                title="--> Build"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                🔗
+                              </a>
+                            )}
+                            <div className="status-block">
+                              <div className="status">
+                                {champion.status === 'vert' && '🟢 Top 1'}
+                                {champion.status === 'orange' && '🟠 Top 2-4'}
+                                {champion.status === 'jaune' && '🟡 Top 5-8'}
+                                {champion.status === 'blanc' && '⚪ Non joué'}
+                              </div>
+                              {champion.status === 'vert' && (
+                                <div className="top1-controls">
+                                  <button
+                                    className="top1-decrement"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      decrementTop1(champion.id)
+                                    }}
+                                  >
+                                    −
+                                  </button>
+                                  <button
+                                    className="top1-increment"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      incrementTop1(champion.id)
+                                    }}
+                                  >
+                                    +1
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                         </div>
                       </div>
+                      {champion.status === 'vert' && (champion.top1_count ?? 0) > 0 && (
+                        <div 
+                          className="top1-overlay-count"
+                          style={{
+                            position: 'absolute',
+                            top: '50%',
+                            left: '50%',
+                            transform: 'translate(-50%, -50%)',
+                            zIndex: 10,
+                            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            pointerEvents: 'none'
+                          }}
+                        >
+                          × {(champion.top1_count ?? 1)}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1197,7 +1421,7 @@ function App() {
           {/* Colonne droite - Panneau de statistiques */}
           <div className="status-panel">
             <h2>Statistiques</h2>
-            
+
             <div className="status-counts">
               <div className="status-item vert">
                 <span className="status-label">🟢 Top 1</span>
@@ -1222,8 +1446,8 @@ function App() {
             </div>
 
             <div className="progress-bar-container">
-              <div 
-                className="progress-bar-fill" 
+              <div
+                className="progress-bar-fill"
                 style={{ width: `${percentage}%` }}
               ></div>
             </div>
@@ -1256,8 +1480,8 @@ function App() {
               backdropFilter: 'blur(10px)'
             }}>
               <div style={{ fontSize: '48px', marginBottom: '20px' }}>✨</div>
-              <h3 style={{ 
-                color: '#ffd700', 
+              <h3 style={{
+                color: '#ffd700',
                 marginBottom: '20px',
                 fontSize: '24px',
                 fontWeight: '600'
@@ -1387,27 +1611,27 @@ function App() {
               <p style={{ color: '#ffffff', marginBottom: '10px' }}>
                 Êtes-vous sûr de vouloir supprimer la saison :
               </p>
-              <p style={{ 
-                color: '#ffd700', 
-                fontWeight: 'bold', 
+              <p style={{
+                color: '#ffd700',
+                fontWeight: 'bold',
                 fontSize: '18px',
-                marginBottom: '20px' 
+                marginBottom: '20px'
               }}>
                 "{currentSeason?.name}"
               </p>
-              <p style={{ 
-                color: '#ff8888', 
-                fontSize: '14px', 
+              <p style={{
+                color: '#ff8888',
+                fontSize: '14px',
                 marginBottom: '25px',
-                fontStyle: 'italic' 
+                fontStyle: 'italic'
               }}>
                 ⚠️ Cette action est irréversible ! Tous les statuts des champions seront perdus.
               </p>
-              
-              <div style={{ 
-                display: 'flex', 
-                gap: '15px', 
-                justifyContent: 'center' 
+
+              <div style={{
+                display: 'flex',
+                gap: '15px',
+                justifyContent: 'center'
               }}>
                 <button
                   onClick={deleteSeason}
@@ -1464,11 +1688,11 @@ function App() {
 
         {/* Modal de renommage de saison */}
         {showRenameModal && (
-          <div 
+          <div
             className="modal-backdrop"
             onClick={() => setShowRenameModal(false)}
           >
-            <div 
+            <div
               className="modal-content"
               onClick={(e) => e.stopPropagation()}
               style={{
@@ -1491,7 +1715,7 @@ function App() {
                 <span style={{ fontSize: '1.5em', marginRight: '10px' }}>⚙️</span>
                 <h3 style={{ margin: 0, color: '#ffffff' }}>Renommer la saison</h3>
               </div>
-              
+
               <input
                 type="text"
                 defaultValue={currentSeason?.name || ''}
@@ -1515,7 +1739,7 @@ function App() {
                   boxSizing: 'border-box'
                 }}
               />
-              
+
               <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
                 <button
                   onClick={(e) => {
@@ -1581,7 +1805,7 @@ function App() {
         )}
         {/* Modal de déconnexion */}
         {showLogoutModal && (
-          <div 
+          <div
             style={{
               position: 'fixed',
               top: 0,
@@ -1596,7 +1820,7 @@ function App() {
               zIndex: 2000
             }}
           >
-            <div 
+            <div
               style={{
                 background: 'rgba(255, 255, 255, 0.15)',
                 backdropFilter: 'blur(20px)',
@@ -1610,24 +1834,24 @@ function App() {
                 color: '#ffffff'
               }}
             >
-              <h3 style={{ 
-                margin: '0 0 15px 0', 
-                fontSize: '1.3em', 
-                color: '#ffd700' 
+              <h3 style={{
+                margin: '0 0 15px 0',
+                fontSize: '1.3em',
+                color: '#ffd700'
               }}>
                 Confirmation de déconnexion
               </h3>
-              <p style={{ 
-                margin: '0 0 25px 0', 
-                fontSize: '1.1em', 
-                lineHeight: '1.4' 
+              <p style={{
+                margin: '0 0 25px 0',
+                fontSize: '1.1em',
+                lineHeight: '1.4'
               }}>
                 Êtes-vous sûr de vouloir vous déconnecter ?
               </p>
-              <div style={{ 
-                display: 'flex', 
-                gap: '15px', 
-                justifyContent: 'center' 
+              <div style={{
+                display: 'flex',
+                gap: '15px',
+                justifyContent: 'center'
               }}>
                 <button
                   onClick={() => {
@@ -1694,184 +1918,240 @@ function App() {
         )}
 
         {/* Panneau latéral amis */}
-      <div className={`friends-drawer ${showFriendsPanel ? 'open' : ''}`}>
-        <div className="friends-drawer-header">
-          <span>Amis</span>
-          <button className="drawer-close-btn" onClick={() => setShowFriendsPanel(false)}>×</button>
-        </div>
-
-        {/* === Ajouter un ami (déplacé ici) === */}
-        <div className="friends-add">
-          <div className="friends-title">Ajouter un ami</div>
-          <div className="friend-form">
-            <input
-              type="text"
-              placeholder="Pseudo"
-              value={friendUsername}
-              onChange={(e) => setFriendUsername(e.target.value)}
-            />
-            <span className="hash-sep">#</span>
-            <input
-              type="text"
-              placeholder="Code"
-              value={friendTag}
-              onChange={(e) => setFriendTag(e.target.value)}
-            />
-            <button type="button" className="friend-send" onClick={sendFriendRequest}>
-              Envoyer
-            </button>
+        <div className={`friends-drawer ${showFriendsPanel ? 'open' : ''}`}>
+          <div className="friends-drawer-header">
+            <span>Amis</span>
+            <button className="drawer-close-btn" onClick={() => setShowFriendsPanel(false)}>×</button>
           </div>
-          {friendMessage && <div className="friend-message">{friendMessage}</div>}
-        </div>
 
-        {/* Liste des demandes et amis */}
-        <h3 className="friends-section-title">Demandes d'amis</h3>
-        <div className="pending-list">
-          {pendingRequests.length === 0 ? (
-            <div className="empty-text">Aucune demande en attente</div>
-          ) : (
-            pendingRequests.map(req => (
-              <div key={req.id} className="friend-row">
-                <div className="friend-handle">{req.requester_handle || req.requester_id}</div>
-                <div className="friend-actions">
-                  <button className="accept-btn" onClick={() => acceptFriendRequest(req.id)}>Accepter</button>
-                  <button className="reject-btn" onClick={() => rejectFriendRequest(req.id)}>Refuser</button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        <h3 className="friends-section-title">Mes amis</h3>
-        <div className="friends-list">
-          {friends.length === 0 ? (
-            <div className="empty-text">Aucun ami pour l'instant</div>
-          ) : (
-            friends.map(fr => (
-              <div key={fr.user_id} className="friend-row">
-                <div className="friend-left">
-                  {fr.avatar ? (
-                    <img src={fr.avatar} alt={fr.handle} className="friend-avatar" />
-                  ) : (
-                    <span className="friend-avatar-fallback">👤</span>
-                  )}
-                  <div className="friend-handle">{fr.handle}</div>
-                </div>
-                <div className="friend-actions">
-                  <button className="accept-btn" onClick={() => startComparison(fr)}>Comparer</button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* Bouton flottant "Amis" en bas à droite — déplacé hors du drawer */}
-      <button
-        className={`friends-fab ${pendingNotifCount > 0 ? 'has-notifs' : ''}`}
-        title={pendingNotifCount > 0 ? `${pendingNotifCount} demande${pendingNotifCount > 1 ? 's' : ''} d'ami` : 'Amis'}
-        onClick={() => setShowFriendsPanel(s => !s)}
-      >
-        <span className="friends-fab-icon">👥</span>
-        {pendingNotifCount > 0 && (
-          <span className="friends-fab-badge">{pendingNotifCount}</span>
-        )}
-      </button>
-
-      {/* Modal de comparaison ami */}
-      {showComparison && (
-        <div className="modal-backdrop" onClick={() => setShowComparison(false)}>
-          <div className="comparison-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="comparison-header">
-          <div className="side left">
-                <div className="header-row">
-                  <div className="comparison-avatar">
-                    {userProfile?.avatar ? (
-                      <img src={userProfile.avatar} alt="Moi" />
-                    ) : (
-                      <div className="avatar-placeholder">👤</div>
-                    )}
-                  </div>
-                  <div className="comparison-name">
-                    {userProfile ? `${userProfile.username}#${userProfile.tag}` : 'Moi'}
-                  </div>
-                </div>
-                <div className="comparison-score score-left">{totalPoints}</div>
-              </div>
-
-              <div className="side right">
-                <div className="header-row">
-                  <div className="comparison-name">
-                    {selectedFriend?.handle || 'Ami'}
-                  </div>
-                  <div className="comparison-avatar">
-                    {selectedFriend && (selectedFriend as any).avatar ? (
-                      <img
-                        src={(selectedFriend as any).avatar}
-                        alt={selectedFriend?.handle || 'Ami'}
-                        onError={(e) => {
-                          const img = e.target as HTMLImageElement
-                          img.style.display = 'none'
-                        }}
-                      />
-                    ) : (
-                      <div className="avatar-placeholder">👥</div>
-                    )}
-                  </div>
-                </div>
-                <div className="comparison-score score-right">{friendTotalPoints}</div>
-              </div>
-
-              <div className="vs-divider">
-                <img src="/vs.png" alt="VS" className="vs-image" />
-              </div>
+          {/* === Ajouter un ami (déplacé ici) === */}
+          <div className="friends-add">
+            <div className="friends-title">Ajouter un ami</div>
+            <div className="friend-form">
+              <input
+                type="text"
+                placeholder="Pseudo"
+                value={friendUsername}
+                onChange={(e) => setFriendUsername(e.target.value)}
+              />
+              <span className="hash-sep">#</span>
+              <input
+                type="text"
+                placeholder="Code"
+                value={friendTag}
+                onChange={(e) => setFriendTag(e.target.value)}
+              />
+              <button type="button" className="friend-send" onClick={sendFriendRequest}>
+                Envoyer
+              </button>
             </div>
+            {friendMessage && <div className="friend-message">{friendMessage}</div>}
+          </div>
 
-            {comparisonMessage ? (
-              <div className="empty-text" style={{ marginTop: '10px' }}>{comparisonMessage}</div>
+          {/* Liste des demandes et amis */}
+          <h3 className="friends-section-title">Demandes d'amis</h3>
+          <div className="pending-list">
+            {pendingRequests.length === 0 ? (
+              <div className="empty-text">Aucune demande en attente</div>
             ) : (
-              <div className="comparison-list">
-                {champions
-                  .filter(ch => {
-                    const fr = friendChampions.find(fc => fc.id === ch.id)
-                    const myStatus = ch.status
-                    const frStatus = fr?.status || 'blanc'
-                    return !(myStatus === 'blanc' && frStatus === 'blanc')
-                  })
-                  .sort((a, b) => a.name.localeCompare(b.name))
-                  .map(ch => {
-                    const fr = friendChampions.find(fc => fc.id === ch.id)
-                    const myStatus = ch.status
-                    const frStatus: Champion['status'] = (fr?.status as Champion['status']) || 'blanc'
-                    const statusLabel = (s: Champion['status']) =>
-                      s === 'vert' ? '🟢 Top 1'
-                      : s === 'orange' ? '🟠 Top 2-4'
-                      : s === 'jaune' ? '🟡 Top 5-8'
-                      : '⚪ Non joué'
-                    return (
-                      <div key={ch.id} className="comparison-item">
-                        <div className="comparison-side left">
-                          <span className="status-badge" title="Mon statut">{statusLabel(myStatus)}</span>
-                        </div>
-                        <div className="comparison-name">{ch.name}</div>
-                        <div className="comparison-side right">
-                          <span className="status-badge" title="Statut de l'ami">{statusLabel(frStatus)}</span>
-                        </div>
-                      </div>
-                    )
-                  })}
-              </div>
+              pendingRequests.map(req => (
+                <div key={req.id} className="friend-row">
+                  <div className="friend-handle">{req.requester_handle || req.requester_id}</div>
+                  <div className="friend-actions">
+                    <button className="accept-btn" onClick={() => acceptFriendRequest(req.id)}>Accepter</button>
+                    <button className="reject-btn" onClick={() => rejectFriendRequest(req.id)}>Refuser</button>
+                  </div>
+                </div>
+              ))
             )}
+          </div>
 
-            <div className="modal-footer">
-              <button className="secondary-btn" onClick={() => setShowComparison(false)}>Fermer</button>
-            </div>
+          <h3 className="friends-section-title">Mes amis</h3>
+          <div className="friends-list">
+            {friends.length === 0 ? (
+              <div className="empty-text">Aucun ami pour l'instant</div>
+            ) : (
+              friends.map(fr => (
+                <div key={fr.user_id} className="friend-row">
+                  <div className="friend-left">
+                    {fr.avatar ? (
+                      <img src={fr.avatar} alt={fr.handle} className="friend-avatar" />
+                    ) : (
+                      <span className="friend-avatar-fallback">👤</span>
+                    )}
+                    <div className="friend-handle">{fr.handle}</div>
+                  </div>
+                  <div className="friend-actions">
+                    <button className="accept-btn" onClick={() => startComparison(fr)}>Comparer</button>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
-      )}
 
-      {/* Modal de profil */}
-      {showProfileModal && (
+        {/* Bouton flottant "Amis" en bas à droite — déplacé hors du drawer */}
+        <button
+          className={`friends-fab ${pendingNotifCount > 0 ? 'has-notifs' : ''}`}
+          title={pendingNotifCount > 0 ? `${pendingNotifCount} demande${pendingNotifCount > 1 ? 's' : ''} d'ami` : 'Amis'}
+          onClick={() => setShowFriendsPanel(s => !s)}
+        >
+          <span className="friends-fab-icon">👥</span>
+          {pendingNotifCount > 0 && (
+            <span className="friends-fab-badge">{pendingNotifCount}</span>
+          )}
+        </button>
+
+        {/* Modal de comparaison ami */}
+        {showComparison && (
+          <div className="modal-backdrop" onClick={() => setShowComparison(false)}>
+            <div className="comparison-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="comparison-header">
+                <div className="side left">
+                  <div className="header-row">
+                    <div className="comparison-avatar">
+                      {userProfile?.avatar ? (
+                        <img src={userProfile.avatar} alt="Moi" />
+                      ) : (
+                        <div className="avatar-placeholder">👤</div>
+                      )}
+                    </div>
+                    <div className="comparison-name">
+                      {userProfile ? `${userProfile.username}#${userProfile.tag}` : 'Moi'}
+                    </div>
+                  </div>
+                  <div className="comparison-score score-left">{totalPoints}</div>
+                </div>
+
+                <div className="side right">
+                  <div className="header-row">
+                    <div className="comparison-name">
+                      {selectedFriend?.handle || 'Ami'}
+                    </div>
+                    <div className="comparison-avatar">
+                      {selectedFriend && (selectedFriend as any).avatar ? (
+                        <img
+                          src={(selectedFriend as any).avatar}
+                          alt={selectedFriend?.handle || 'Ami'}
+                          onError={(e) => {
+                            const img = e.target as HTMLImageElement
+                            img.style.display = 'none'
+                          }}
+                        />
+                      ) : (
+                        <div className="avatar-placeholder">👥</div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="comparison-score score-right">{friendTotalPoints}</div>
+                </div>
+
+                <div className="vs-divider">
+                  <img src="/vs.png" alt="VS" className="vs-image" />
+                </div>
+              </div>
+
+              {/* Statistiques des joueurs comparés */}
+              <div className="comparison-stats">
+                <div className="stats-card left">
+                  <div className="stats-title">Mes stats</div>
+                  <div className="stats-items">
+                    <div className="stats-item">
+                      <span className="stats-label">🟢 Top 1</span>
+                      <span className="stats-value">{statusCounts.vert || 0}</span>
+                    </div>
+                    <div className="stats-item">
+                      <span className="stats-label">🟠 Top 2-4</span>
+                      <span className="stats-value">{statusCounts.orange || 0}</span>
+                    </div>
+                    <div className="stats-item">
+                      <span className="stats-label">🟡 Top 5-8</span>
+                      <span className="stats-value">{statusCounts.jaune || 0}</span>
+                    </div>
+                    <div className="stats-item">
+                      <span className="stats-label">⚪ Non joué</span>
+                      <span className="stats-value">{statusCounts.blanc || 0}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="stats-card right">
+                  <div className="stats-title">Stats ami</div>
+                  <div className="stats-items">
+                    <div className="stats-item">
+                      <span className="stats-label">🟢 Top 1</span>
+                      <span className="stats-value">{friendStatusCounts.vert || 0}</span>
+                    </div>
+                    <div className="stats-item">
+                      <span className="stats-label">🟠 Top 2-4</span>
+                      <span className="stats-value">{friendStatusCounts.orange || 0}</span>
+                    </div>
+                    <div className="stats-item">
+                      <span className="stats-label">🟡 Top 5-8</span>
+                      <span className="stats-value">{friendStatusCounts.jaune || 0}</span>
+                    </div>
+                    <div className="stats-item">
+                      <span className="stats-label">⚪ Non joué</span>
+                      <span className="stats-value">{friendStatusCounts.blanc || 0}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {comparisonMessage ? (
+                <div className="empty-text" style={{ marginTop: '10px' }}>{comparisonMessage}</div>
+              ) : (
+                <div className="comparison-list">
+                  {champions
+                    .filter(ch => {
+                      const fr = friendChampions.find(fc => fc.id === ch.id)
+                      const myStatus = ch.status
+                      const frStatus = fr?.status || 'blanc'
+                      return !(myStatus === 'blanc' && frStatus === 'blanc')
+                    })
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map(ch => {
+                      const fr = friendChampions.find(fc => fc.id === ch.id)
+                      const myStatus = ch.status
+                      const frStatus: Champion['status'] = (fr?.status as Champion['status']) || 'blanc'
+                      const myTop1 = myStatus === 'vert' ? (ch.top1_count ?? 0) : 0
+                      const frTop1 = frStatus === 'vert' ? (fr?.top1_count ?? 0) : 0
+                      const statusLabel = (s: Champion['status'], count?: number) =>
+                        s === 'vert'
+                          ? `🟢 Top 1${(count ?? 0) > 0 ? ' × ' + count : ''}`
+                          : s === 'orange'
+                            ? '🟠 Top 2-4'
+                            : s === 'jaune'
+                              ? '🟡 Top 5-8'
+                              : '⚪ Non joué'
+                      return (
+                        <div key={ch.id} className="comparison-item">
+                          <div className="comparison-side left">
+                            <span className="status-badge" title="Mon statut">
+                              {statusLabel(myStatus, myTop1)}
+                            </span>
+                          </div>
+                          <div className="comparison-name">{ch.name}</div>
+                          <div className="comparison-side right">
+                            <span className="status-badge" title="Statut de l'ami">
+                              {statusLabel(frStatus, frTop1)}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                </div>
+              )}
+
+              <div className="modal-footer">
+                <button className="secondary-btn" onClick={() => setShowComparison(false)}>Fermer</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de profil */}
+        {showProfileModal && (
           <div className="modal-backdrop" onClick={() => setShowProfileModal(false)}>
             <div className="account-modal" onClick={(e) => e.stopPropagation()}>
               <div className="account-header">
@@ -1912,7 +2192,7 @@ function App() {
                     className="input"
                   />
                   <input
-                    type="text"
+                    type="number"
                     placeholder="Tag (4 chiffres)"
                     value={tagInput}
                     onChange={(e) => setTagInput(e.target.value)}
@@ -1958,14 +2238,14 @@ function App() {
                     >
                       {showPwd ? (
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/>
-                          <circle cx="12" cy="12" r="3"/>
+                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" />
+                          <circle cx="12" cy="12" r="3" />
                         </svg>
                       ) : (
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/>
-                          <circle cx="12" cy="12" r="3"/>
-                          <path d="M3 3l18 18"/>
+                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" />
+                          <circle cx="12" cy="12" r="3" />
+                          <path d="M3 3l18 18" />
                         </svg>
                       )}
                     </button>
@@ -1989,14 +2269,14 @@ function App() {
                     >
                       {showConfirmPwd ? (
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/>
-                          <circle cx="12" cy="12" r="3"/>
+                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" />
+                          <circle cx="12" cy="12" r="3" />
                         </svg>
                       ) : (
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/>
-                          <circle cx="12" cy="12" r="3"/>
-                          <path d="M3 3l18 18"/>
+                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" />
+                          <circle cx="12" cy="12" r="3" />
+                          <path d="M3 3l18 18" />
                         </svg>
                       )}
                     </button>
