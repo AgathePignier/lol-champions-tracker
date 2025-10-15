@@ -36,7 +36,7 @@ export default function Auth() {
     
     try {
       const desired = (pseudo || (email.split('@')[0] || '')).trim()
-      const { data, error } = await supabase.auth.signUp({
+      const {error} = await supabase.auth.signUp({
         email,
         password,
         options: {
