@@ -1,8 +1,8 @@
 import { useSessionContext, useSupabaseClient } from '@supabase/auth-helpers-react'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import Auth from '../Auth'
 import './App.css'
-import type { UserProfile } from './types'
+import type { UserProfile, Message } from './types'
 
 // Types
 interface Champion {
@@ -35,6 +35,8 @@ function App() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(false)
+  
+
 
   const incrementTop1 = async (championId: string) => {
     if (!currentSeason || !session?.user?.id) return
@@ -57,19 +59,30 @@ function App() {
         )
       )
 
-      // upsert avec compteur + 1 (status vert garanti)
-      const { error } = await supabase
+      // Remplace upsert par DELETE puis INSERT (plus fiable)
+      const { error: deleteError } = await supabase
         .from('champion_status')
-        .upsert({
-          user_id: session.user.id,
+        .delete()
+        .eq('user_id', session!.user!.id)
+        .eq('champion_id', championId)
+        .eq('season_id', currentSeason!.id)
+
+      if (deleteError) {
+        console.error('❌ Erreur suppression avant insert (increment):', deleteError)
+      }
+
+      const { error: insertError } = await supabase
+        .from('champion_status')
+        .insert({
+          user_id: session!.user!.id,
           champion_id: championId,
-          season_id: currentSeason.id,
+          season_id: currentSeason!.id,
           status: 'vert',
           top1_count: newCount
         })
 
-      if (error) {
-        console.error('❌ Erreur incrément Top1:', error)
+      if (insertError) {
+        console.error('❌ Erreur insertion increment:', insertError)
         alert("❌ Impossible d'incrémenter le compteur Top 1.")
         return
       }
@@ -89,9 +102,8 @@ function App() {
     }
 
     try {
-      const isTop1 = champion.status === 'vert'
       const base = champion.top1_count ?? 1
-      const newCount = isTop1 ? Math.max(1, base - 1) : Math.max(0, base - 1)
+      const newCount = Math.max(1, base - 1) // min 1 tant que statut vert
 
       // mise à jour locale
       setChampions(prev =>
@@ -100,18 +112,30 @@ function App() {
         )
       )
 
-      const { error } = await supabase
+      // Remplace upsert par DELETE puis INSERT (plus fiable)
+      const { error: deleteError } = await supabase
         .from('champion_status')
-        .upsert({
-          user_id: session.user.id,
+        .delete()
+        .eq('user_id', session!.user!.id)
+        .eq('champion_id', championId)
+        .eq('season_id', currentSeason!.id)
+
+      if (deleteError) {
+        console.error('❌ Erreur suppression avant insert (decrement):', deleteError)
+      }
+
+      const { error: insertError } = await supabase
+        .from('champion_status')
+        .insert({
+          user_id: session!.user!.id,
           champion_id: championId,
-          season_id: currentSeason.id,
+          season_id: currentSeason!.id,
           status: 'vert',
           top1_count: newCount
         })
 
-      if (error) {
-        console.error('❌ Erreur décrément Top1:', error)
+      if (insertError) {
+        console.error('❌ Erreur insertion decrement:', insertError)
         alert("❌ Impossible de diminuer le compteur Top 1.")
         return
       }
@@ -148,8 +172,33 @@ function App() {
   const [, setFriendSeason] = useState<Season | null>(null)
   const [friendChampions, setFriendChampions] = useState<Champion[]>([])
   const [showComparison, setShowComparison] = useState(false)
+  const [isMiniChatOpen, setIsMiniChatOpen] = useState(false)   // à coller vers la ligne ~149
+  const [isMiniChatMinimized, setIsMiniChatMinimized] = useState(false)
+  const [chatFriend, setChatFriend] = useState<{ user_id: string; handle: string; avatar?: string } | null>(null)
   const [comparisonMessage, setComparisonMessage] = useState<string | null>(null)
+  const [chatInput, setChatInput] = useState('')
+  const [chatMessages, setChatMessages] = useState<Message[]>([])
+  const chatChannelRef = useRef<any>(null)
+  const inboxChannelRef = useRef<any>(null)
+ const [unreadByFriend, setUnreadByFriend] = useState<Record<string, number>>({})
+  const getAvatarUrl = (a?: string) => {
+    if (!a) return '/avatars/1.png'
+    if (a.startsWith('http')) return a
+    const name = a.replace(/^\/?avatars\//, '').replace(/\.png$/,'')
+    return `/avatars/${name}.png`
+  }
+  const bubbleFriends = useMemo<Array<{ user_id: string; handle: string; avatar?: string }>>(() => {
+    const list: Array<{ user_id: string; handle: string; avatar?: string }> = []
+    if (isMiniChatMinimized && chatFriend) list.push(chatFriend)
 
+    const unreadIds = Object.keys(unreadByFriend).filter(uid => (unreadByFriend[uid] || 0) > 0)
+    unreadIds.forEach(uid => {
+      if (chatFriend && chatFriend.user_id === uid) return
+      const f = friends.find(fr => fr.user_id === uid)
+      list.push(f ? f : { user_id: uid, handle: 'Ami', avatar: undefined })
+    })
+    return list
+  }, [isMiniChatMinimized, chatFriend, unreadByFriend, friends])
   // Scores ami pour le header de comparaison
   const friendStatusCounts = friendChampions.reduce((counts, c) => {
     counts[c.status] = (counts[c.status] || 0) + 1
@@ -806,6 +855,111 @@ function App() {
     }
   }
 
+  // Charger et écouter le chat du friend sélectionné
+  useEffect(() => {
+    const friendId = chatFriend?.user_id
+    const myId = session?.user?.id
+    if (!myId || !friendId) return
+
+    const loadChatMessages = async () => {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .or(
+          `and(sender_id.eq.${myId},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${myId})`
+        )
+        .order('created_at', { ascending: true })
+        .limit(200)
+      if (!error && data) setChatMessages(data as Message[])
+    }
+
+    if (chatChannelRef.current) supabase.removeChannel(chatChannelRef.current)
+    chatChannelRef.current = supabase
+      .channel(`chat-${myId}-${friendId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        (payload) => {
+          const m = payload.new as Message
+          if (
+            (m.sender_id === friendId && m.receiver_id === myId) ||
+            (m.sender_id === myId && m.receiver_id === friendId)
+          ) {
+            setChatMessages(prev => [...prev, m])
+          }
+        }
+      )
+      .subscribe()
+
+    loadChatMessages()
+
+    return () => {
+      if (chatChannelRef.current) supabase.removeChannel(chatChannelRef.current)
+      chatChannelRef.current = null
+    }
+  }, [session?.user?.id, friends, isMiniChatOpen, chatFriend])
+
+  useEffect(() => {
+    const myId = session?.user?.id
+    if (!myId) return
+
+    // Nettoie un ancien canal si présent
+    if (inboxChannelRef.current) supabase.removeChannel(inboxChannelRef.current)
+
+    // S'abonne à tous les INSERT où je suis le destinataire
+    inboxChannelRef.current = supabase
+      .channel(`inbox-${myId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `receiver_id=eq.${myId}`,
+        },
+        (payload) => {
+          const newMsg = payload.new as Message
+
+          // Si le mini‑chat est déjà ouvert sur cet ami, pas de bulle (le canal dédié gère l'affichage)
+          if (isMiniChatOpen && chatFriend?.user_id === newMsg.sender_id) return
+
+          // Incrémente le compteur de non‑lus et force l'apparition en mode "réduit"
+          setUnreadByFriend(prev => ({
+            ...prev,
+            [newMsg.sender_id]: (prev[newMsg.sender_id] || 0) + 1,
+          }))
+          setIsMiniChatMinimized(true)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      if (inboxChannelRef.current) supabase.removeChannel(inboxChannelRef.current)
+      inboxChannelRef.current = null
+    }
+  }, [session?.user?.id, isMiniChatOpen, chatFriend])
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const friendId = chatFriend?.user_id
+    const myId = session?.user?.id
+    const content = chatInput.trim()
+    if (!myId || !friendId || !content) return
+
+    setChatInput('')
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({
+        sender_id: myId,
+        receiver_id: friendId,
+        content,
+      })
+      .select()
+    if (!error && data && data[0]) {
+      setChatMessages((prev) => [...prev, data[0] as Message])
+    }
+  }
+
   // Démarrer la comparaison avec un ami
   const startComparison = async (friend: { user_id: string; handle: string; avatar?: string }) => {
     setSelectedFriend(friend)
@@ -828,7 +982,13 @@ function App() {
     }
     setFriendChampions(fc)
   }
-
+  const openChat = (friend: { user_id: string; handle: string; avatar?: string }) => {
+    setShowFriendsPanel(false)
+    setChatFriend(friend)
+    setIsMiniChatOpen(true)
+    setIsMiniChatMinimized(false)
+    setUnreadByFriend(prev => ({ ...prev, [friend.user_id]: 0 }))
+  }
   const loadUserProfile = async () => {
     if (!session?.user?.id) return
     const { data, error } = await supabase
@@ -938,77 +1098,83 @@ function App() {
   }, [currentSeason])
 
   const handleStatusChange = async (championId: string) => {
-    if (!currentSeason) return
+    if (!currentSeason || !session?.user?.id) {
+      console.error('❌ Erreur: Pas de saison active ou utilisateur non connecté')
+      return
+    }
 
     const champion = champions.find(c => c.id === championId)
     if (!champion) return
 
-    const statusOrder = ['blanc', 'jaune', 'orange', 'vert'] as const
-    const currentIndex = statusOrder.indexOf(champion.status)
-    const nextStatus = statusOrder[(currentIndex + 1) % statusOrder.length]
-
-    // si passage à vert pour la première fois, impose ×1
-    if (nextStatus === 'vert') {
-      const current = champions.find(c => c.id === championId)
-      const ensuredCount = Math.max(1, current?.top1_count ?? 0)
-
-      // met à jour l'état local
-      setChampions(prev =>
-        prev.map(c =>
-          c.id === championId ? { ...c, status: 'vert', top1_count: ensuredCount } : c
-        )
-      )
-
-      // persiste le statut + top1_count
-      try {
-        const { error } = await supabase
-          .from('champion_status')
-          .upsert({
-            user_id: session?.user?.id,
-            champion_id: championId,
-            status: 'vert',
-            season_id: currentSeason.id,
-            top1_count: ensuredCount
-          })
-
-        if (error) {
-          console.error('❌ Erreur Supabase:', error)
-        } else {
-          console.log(`✅ Statut sauvegardé: ${champion.name} → vert (×${ensuredCount})`)
-        }
-      } catch (err) {
-        console.error('❌ Erreur réseau:', err)
-      }
-      return
+    // Déterminer le prochain statut avec cycle modifié
+    let nextStatus: Champion['status'] = 'blanc'
+    let nextCount = 0
+    
+    if (champion.status === 'vert') {
+      // Si déjà vert, revenir à blanc et réinitialiser le compteur
+      nextStatus = 'blanc'
+      nextCount = 0
+    } else {
+      // Sinon, suivre la progression normale
+      const statusOrder = ['blanc', 'jaune', 'orange', 'vert'] as const
+      const currentIndex = statusOrder.indexOf(champion.status)
+      nextStatus = statusOrder[(currentIndex + 1) % statusOrder.length]
+      
+      // Passage à vert: ne pas forcer ×1 — on garde 0 pour cacher ×1
+      nextCount = nextStatus === 'vert' ? Math.max(0, champion.top1_count ?? 0) : (champion.top1_count ?? 0)
     }
 
-    // Mise à jour locale immédiate
-    setChampions(prevChampions =>
-      prevChampions.map(c =>
-        c.id === championId ? { ...c, status: nextStatus } : c
+    // met à jour l'état local
+    setChampions(prev =>
+      prev.map(c =>
+        c.id === championId ? { ...c, status: nextStatus, top1_count: nextCount } : c
       )
     )
 
-    // Sauvegarde dans Supabase avec season_id
+    // Sauvegarde dans Supabase - Approche alternative avec DELETE puis INSERT
     try {
-      const { error } = await supabase
+      console.log('💾 Tentative de sauvegarde avec DELETE puis INSERT')
+      
+      // 1. D'abord supprimer l'entrée existante
+      const { error: deleteError } = await supabase
         .from('champion_status')
-        .upsert({
-          user_id: session?.user?.id,
+        .delete()
+        .eq('user_id', session.user.id)
+        .eq('champion_id', championId)
+        .eq('season_id', currentSeason.id)
+      
+      if (deleteError) {
+        console.error('❌ Erreur lors de la suppression:', deleteError)
+      } else {
+        console.log('✅ Suppression réussie ou aucune entrée à supprimer')
+      }
+      
+      // 2. Puis insérer la nouvelle entrée
+      const { error: insertError } = await supabase
+        .from('champion_status')
+        .insert({
+          user_id: session.user.id,
           champion_id: championId,
           status: nextStatus,
-          season_id: currentSeason.id
+          season_id: currentSeason.id,
+          top1_count: nextCount
         })
 
-      if (error) {
-        console.error('❌ Erreur Supabase:', error)
+      if (insertError) {
+        console.error('❌ Erreur lors de l\'insertion:', insertError)
       } else {
-        console.log(`✅ Statut sauvegardé: ${champion.name} → ${nextStatus}`)
+        if (nextStatus === 'blanc' && champion.status === 'vert') {
+          console.log(`✅ Champion réinitialisé: ${champion.name} → blanc (compteur remis à 0)`)
+        } else {
+          console.log(`✅ Statut sauvegardé: ${champion.name} → ${nextStatus}${nextCount > 0 ? ` (compteur: ${nextCount})` : ''}`)
+        }
       }
     } catch (err) {
       console.error('❌ Erreur réseau:', err)
     }
   }
+  
+  // Nouvelle fonction pour réinitialiser directement à blanc
 
   // Filtrage et tri
   const filteredChampions = champions.filter(champion =>
@@ -1349,52 +1515,52 @@ function App() {
                       <div className="champion-info">
                         <h3>{champion.name}</h3>
                         <div className="champion-right">
-                            {champion.link_url && (
-                              <a
-                                href={champion.link_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="champion-link-btn"
-                                title="--> Build"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                🔗
-                              </a>
-                            )}
-                            <div className="status-block">
-                              <div className="status">
-                                {champion.status === 'vert' && '🟢 Top 1'}
-                                {champion.status === 'orange' && '🟠 Top 2-4'}
-                                {champion.status === 'jaune' && '🟡 Top 5-8'}
-                                {champion.status === 'blanc' && '⚪ Non joué'}
-                              </div>
-                              {champion.status === 'vert' && (
-                                <div className="top1-controls">
-                                  <button
-                                    className="top1-decrement"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      decrementTop1(champion.id)
-                                    }}
-                                  >
-                                    −
-                                  </button>
-                                  <button
-                                    className="top1-increment"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      incrementTop1(champion.id)
-                                    }}
-                                  >
-                                    +1
-                                  </button>
-                                </div>
-                              )}
+                          {champion.link_url && (
+                            <a
+                              href={champion.link_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="champion-link-btn"
+                              title="--> Build"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              🔗
+                            </a>
+                          )}
+                          <div className="status-block">
+                            <div className="status">
+                              {champion.status === 'vert' && '🟢 Top 1'}
+                              {champion.status === 'orange' && '🟠 Top 2-4'}
+                              {champion.status === 'jaune' && '🟡 Top 5-8'}
+                              {champion.status === 'blanc' && '⚪ Non joué'}
                             </div>
+                            {champion.status === 'vert' && (
+                              <div className="top1-controls">
+                                <button
+                                  className="top1-decrement"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    decrementTop1(champion.id)
+                                  }}
+                                >
+                                  −
+                                </button>
+                                <button
+                                  className="top1-increment"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    incrementTop1(champion.id)
+                                  }}
+                                >
+                                  +1
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
-                      {champion.status === 'vert' && (champion.top1_count ?? 0) > 0 && (
-                        <div 
+                      {champion.status === 'vert' && (champion.top1_count ?? 0) >= 2 && (
+                        <div
                           className="top1-overlay-count"
                           style={{
                             position: 'absolute',
@@ -1408,7 +1574,7 @@ function App() {
                             pointerEvents: 'none'
                           }}
                         >
-                          × {(champion.top1_count ?? 1)}
+                          × {champion.top1_count}
                         </div>
                       )}
                     </div>
@@ -1982,6 +2148,13 @@ function App() {
                     <div className="friend-handle">{fr.handle}</div>
                   </div>
                   <div className="friend-actions">
+                    <button
+                      className="message-icon-btn"
+                      title="Message"
+                      onClick={(e) => { e.stopPropagation(); openChat(fr) }}
+                    >
+                      💬
+                    </button>
                     <button className="accept-btn" onClick={() => startComparison(fr)}>Comparer</button>
                   </div>
                 </div>
@@ -1992,7 +2165,7 @@ function App() {
 
         {/* Bouton flottant "Amis" en bas à droite — déplacé hors du drawer */}
         <button
-          className={`friends-fab ${pendingNotifCount > 0 ? 'has-notifs' : ''}`}
+          className={`friends-fab ${isMiniChatOpen ? 'hidden' : ''} ${pendingNotifCount > 0 ? 'has-notifs' : ''}`}
           title={pendingNotifCount > 0 ? `${pendingNotifCount} demande${pendingNotifCount > 1 ? 's' : ''} d'ami` : 'Amis'}
           onClick={() => setShowFriendsPanel(s => !s)}
         >
@@ -2001,6 +2174,59 @@ function App() {
             <span className="friends-fab-badge">{pendingNotifCount}</span>
           )}
         </button>
+
+        <div className="mini-chat-bubbles">
+          {bubbleFriends.map((fr: { user_id: string; handle: string; avatar?: string }) => (
+            <button
+              key={fr.user_id}
+              className="mini-chat-bubble"
+              onClick={(e) => { e.stopPropagation(); openChat(fr) }}
+              title={`Message avec ${fr.handle}`}
+            >
+              <img
+                className="mini-chat-bubble-avatar"
+                src={getAvatarUrl(fr.avatar)}
+                alt={fr.handle}
+              />
+              {(unreadByFriend[fr.user_id] || 0) > 0 && (
+                <span className="mini-chat-bubble-badge">{unreadByFriend[fr.user_id]}</span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {chatFriend && (
+          <div className={`mini-chat-panel ${isMiniChatOpen ? 'open' : ''}`} aria-expanded={isMiniChatOpen}>
+            <div className="mini-chat-header">
+              <img
+                className="mini-chat-header-avatar"
+                src={getAvatarUrl(chatFriend?.avatar)}
+                alt={chatFriend?.handle || ''}
+              />
+              <span>{chatFriend.handle}</span>
+              <div className="mini-chat-actions">
+                <button className="mini-chat-minimize" onClick={() => { setIsMiniChatOpen(false); setIsMiniChatMinimized(true); }}>–</button>
+                <button className="mini-chat-close" onClick={() => setIsMiniChatOpen(false)}>✕</button>
+              </div>
+            </div>
+            <div className="mini-chat-messages">
+              {chatMessages.map((m) => (
+                <div key={m.id} className={`mini-chat-msg ${m.sender_id === session?.user?.id ? 'me' : 'other'}`}>
+                  {m.content}
+                </div>
+              ))}
+            </div>
+            <form className="mini-chat-input" onSubmit={handleSendMessage}>
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Écrire un message…"
+              />
+              <button type="submit">Envoyer</button>
+            </form>
+          </div>
+        )}
 
         {/* Modal de comparaison ami */}
         {showComparison && (
